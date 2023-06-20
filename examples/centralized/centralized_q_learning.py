@@ -13,7 +13,7 @@ from csnlp.util.math import quad_form
 from csnlp.wrappers import Mpc
 from gymnasium.wrappers import TimeLimit
 from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent
-from mpcrl.util.control import dlqr
+from mpcrl.util.math import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 
@@ -68,7 +68,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
     w = np.tile([[1e2, 1e2]], (1, n))  # agent penalty weight for bound violations
     x_bnd = np.tile([[0, -1], [1, 1]], (1, n))
-    a_bnd = np.tile([[-1], [1]], (1, n))
+    a_bnd = np.tile([[-100], [100]], (1, n))
     e_bnd = np.tile([[-1e-1], [0]], (1, n))  # uniform noise bounds
 
     def reset(
