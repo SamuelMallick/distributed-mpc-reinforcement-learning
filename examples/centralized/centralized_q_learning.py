@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import casadi as cs
 import gymnasium as gym
 import matplotlib.pyplot as plt
-import networkx as netx
+# import networkx as netx
 import numpy as np
 import numpy.typing as npt
 from csnlp import Nlp
@@ -56,13 +56,13 @@ def get_centralized_dynamics(
 class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """A simple discrete-time LTI system affected by noise."""
 
-    n = 3  # number of agents
+    n = 2  # number of agents
     nx_l = 2  # number of agent states
     nu_l = 1  # number of agent inputs
 
     A_l = np.array([[0.9, 0.35], [0, 1.1]])  # agent state-space matrix A
     B_l = np.array([[0.0813], [0.2]])  # agent state-space matrix B
-    A_c = np.array([[0, 0], [0, -0.1]])  # common coupling state-space matrix
+    A_c = np.array([[0, 0], [0, +0.1]])  # common coupling state-space matrix
     A, B = get_centralized_dynamics(n, nx_l, A_l, B_l, A_c)
     nx = n * nx_l  # number of states
     nu = n * nu_l  # number of inputs
@@ -116,9 +116,9 @@ class LinearMpc(Mpc[cs.SX]):
 
     A_l_init = np.asarray([[1, 0.25], [0, 1]])
     B_l_init = np.asarray([[0.0312], [0.25]])
-    A_c_l = np.array([[0, 0], [0, 0]])
+    A_c_l_init = np.array([[0, 0], [0, -0.1]])
     A_init, B_init = get_centralized_dynamics(
-        LtiSystem.n, LtiSystem.nx_l, A_l_init, B_l_init, A_c_l
+        LtiSystem.n, LtiSystem.nx_l, A_l_init, B_l_init, A_c_l_init
     )
 
     learnable_pars_init = {
@@ -127,8 +127,9 @@ class LinearMpc(Mpc[cs.SX]):
         "x_ub": np.tile([1, 0], LtiSystem.n).reshape(-1, 1),
         "b": np.zeros(LtiSystem.nx),
         "f": np.zeros(LtiSystem.nx + LtiSystem.nu),
-        "A": A_init,
-        "B": B_init,
+        "A_l": A_l_init,
+        "B_l": B_l_init,
+        "A_c_l": A_c_l_init,
     }
 
     def __init__(self) -> None:
@@ -146,8 +147,9 @@ class LinearMpc(Mpc[cs.SX]):
         x_ub = self.parameter("x_ub", (nx,))
         b = self.parameter("b", (nx, 1))
         f = self.parameter("f", (nx + nu, 1))
-        A = self.parameter("A", (nx, nx))
-        B = self.parameter("B", (nx, nu))
+        A_l = self.parameter("A_l", (LtiSystem.nx_l, LtiSystem.nx_l))
+        B_l = self.parameter("B_l", (LtiSystem.nx_l, LtiSystem.nu_l))
+        A_c_l = self.parameter("A_c_l", (LtiSystem.nx_l, LtiSystem.nx_l))
 
         # variables (state, action, slack)
         x, _ = self.state("x", nx)
@@ -157,6 +159,7 @@ class LinearMpc(Mpc[cs.SX]):
         s, _, _ = self.variable("s", (nx, N), lb=0)
 
         # dynamics
+        A, B = get_centralized_dynamics(LtiSystem.n, LtiSystem.nx_l, A_l, B_l, A_c_l)
         self.set_dynamics(lambda x, u: A @ x + B @ u + b, n_in=2, n_out=1)
 
         # other constraints
@@ -208,7 +211,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
     )
 )
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(2e1)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(1e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgent(
@@ -222,7 +225,7 @@ agent = Log(  # type: ignore[var-annotated]
         )
     ),
     level=logging.DEBUG,
-    log_frequencies={"on_timestep_end": 1000},
+    log_frequencies={"on_timestep_end": 200},
 )
 agent.train(env=env, episodes=1, seed=69)
 
@@ -266,11 +269,14 @@ axs[0, 1].plot(
 axs[1, 0].plot(updates, np.asarray(agent.updates_history["f"]))
 axs[1, 1].plot(updates, np.squeeze(agent.updates_history["V0"]))
 axs[2, 0].plot(
-    updates, np.asarray(agent.updates_history["A"]).reshape(updates.size, -1)
+    updates, np.asarray(agent.updates_history["A_l"]).reshape(updates.size, -1)
+)
+axs[2, 0].plot(
+    updates, np.asarray(agent.updates_history["A_c_l"]).reshape(updates.size, -1)
 )
 axs[2, 1].plot(
     updates,
-    np.asarray(agent.updates_history["B"]).reshape(updates.size, -1),
+    np.asarray(agent.updates_history["B_l"]).reshape(updates.size, -1),
 )
 axs[0, 0].set_ylabel("$b$")
 axs[0, 1].set_ylabel("$x_1$")
