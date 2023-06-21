@@ -256,7 +256,10 @@ axs[0, 0].plot(updates, np.asarray(agent.updates_history["b"]))
 axs[0, 1].plot(
     updates,
     np.concatenate(
-        [np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)] for n in ("x_lb", "x_ub")],
+        [
+            np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
+            for n in ("x_lb", "x_ub")
+        ],
         -1,
     ),
 )
