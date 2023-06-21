@@ -1,2 +1,2 @@
-mcprl>=1.1.3
+mcprl>=1.1.4
 networkx>=3.1
