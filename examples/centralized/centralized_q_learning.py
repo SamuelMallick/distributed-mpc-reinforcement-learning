@@ -13,19 +13,20 @@ from csnlp.util.math import quad_form
 from csnlp.wrappers import Mpc
 from gymnasium.wrappers import TimeLimit
 from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent
-from mpcrl.util.math import dlqr
+from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 
-n = 3  # number of agents
-seed = 0
-p = 0.5  # probability of edge connection in network
-G = netx.binomial_graph(n, p, seed=seed)
-while netx.is_connected(G):  # generate graphs till finding a connected one
-    print("randomly generated graph not connected, trying again...")
-    seed += 1
-    G = netx.binomial_graph(n, p, seed=seed)
-Adj = netx.adjacency_matrix(G)  # adjacency matrix as coupling in network
+# n = 3  # number of agents
+# seed = 0
+# p = 0.5  # probability of edge connection in network
+# G = netx.binomial_graph(n, p, seed=seed)
+# while netx.is_connected(G):  # generate graphs till finding a connected one
+#     print("randomly generated graph not connected, trying again...")
+#     seed += 1
+#     G = netx.binomial_graph(n, p, seed=seed)
+# Adj = netx.adjacency_matrix(G)  # adjacency matrix as coupling in network
+Adj = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32)
 
 
 def get_centralized_dynamics(
@@ -61,14 +62,14 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
     A_l = np.array([[0.9, 0.35], [0, 1.1]])  # agent state-space matrix A
     B_l = np.array([[0.0813], [0.2]])  # agent state-space matrix B
-    A_c = np.array([[0.01, 0], [0, 0.5]])  # common coupling state-space matrix
+    A_c = np.array([[0, 0], [0, -0.1]])  # common coupling state-space matrix
     A, B = get_centralized_dynamics(n, nx_l, A_l, B_l, A_c)
     nx = n * nx_l  # number of states
     nu = n * nu_l  # number of inputs
 
     w = np.tile([[1e2, 1e2]], (1, n))  # agent penalty weight for bound violations
     x_bnd = np.tile([[0, -1], [1, 1]], (1, n))
-    a_bnd = np.tile([[-100], [100]], (1, n))
+    a_bnd = np.tile([[-1], [1]], (1, n))
     e_bnd = np.tile([[-1e-1], [0]], (1, n))  # uniform noise bounds
 
     def reset(
@@ -79,7 +80,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the LTI system."""
         super().reset(seed=seed, options=options)
-        self.x = np.tile([0, 0.15], n).reshape(self.nx, 1)
+        self.x = np.tile([0, 0.15], self.n).reshape(self.nx, 1)
         return self.x, {}
 
     def get_stage_cost(self, state: npt.NDArray[np.floating], action: float) -> float:
@@ -121,7 +122,7 @@ class LinearMpc(Mpc[cs.SX]):
     )
 
     learnable_pars_init = {
-        "V0": np.asarray(0.0),
+        "V0": np.zeros((LtiSystem.n, 1)),
         "x_lb": np.tile([0, 0], LtiSystem.n).reshape(-1, 1),
         "x_ub": np.tile([1, 0], LtiSystem.n).reshape(-1, 1),
         "b": np.zeros(LtiSystem.nx),
@@ -140,7 +141,7 @@ class LinearMpc(Mpc[cs.SX]):
         super().__init__(nlp, N)
 
         # parameters
-        V0 = self.parameter("V0")
+        V0 = self.parameter("V0", (LtiSystem.n,))
         x_lb = self.parameter("x_lb", (nx,))
         x_ub = self.parameter("x_ub", (nx,))
         b = self.parameter("b", (nx, 1))
@@ -168,7 +169,7 @@ class LinearMpc(Mpc[cs.SX]):
         )
         gammapowers = cs.DM(gamma ** np.arange(N)).T
         self.minimize(
-            V0
+            cs.sum1(V0)
             + quad_form(S, x[:, -1])
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
@@ -249,23 +250,30 @@ axs[1].semilogy(R, "o", markersize=1)
 axs[0].set_ylabel(r"$\tau$")
 axs[1].set_ylabel("$L$")
 
-# TODO: refactor these plots
-# _, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
-# axs[0, 0].plot(np.asarray(agent.updates_history["b"]))
-# axs[0, 1].plot(
-#     np.stack(
-#         [np.asarray(agent.updates_history[n])[:, 0] for n in ("x_lb", "x_ub")], -1
-#     ),
-# )
-# axs[1, 0].plot(np.asarray(agent.updates_history["f"]))
-# axs[1, 1].plot(np.asarray(agent.updates_history["V0"]))
-# axs[2, 0].plot(np.asarray(agent.updates_history["A"]).reshape(-1, 4))
-# axs[2, 1].plot(np.asarray(agent.updates_history["B"]).squeeze())
-# axs[0, 0].set_ylabel("$b$")
-# axs[0, 1].set_ylabel("$x_1$")
-# axs[1, 0].set_ylabel("$f$")
-# axs[1, 1].set_ylabel("$V_0$")
-# axs[2, 0].set_ylabel("$A$")
-# axs[2, 1].set_ylabel("$B$")
+_, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
+updates = np.arange(len(agent.updates_history["b"]))
+axs[0, 0].plot(updates, np.asarray(agent.updates_history["b"]))
+axs[0, 1].plot(
+    updates,
+    np.concatenate(
+        [np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)] for n in ("x_lb", "x_ub")],
+        -1,
+    ),
+)
+axs[1, 0].plot(updates, np.asarray(agent.updates_history["f"]))
+axs[1, 1].plot(updates, np.squeeze(agent.updates_history["V0"]))
+axs[2, 0].plot(
+    updates, np.asarray(agent.updates_history["A"]).reshape(updates.size, -1)
+)
+axs[2, 1].plot(
+    updates,
+    np.asarray(agent.updates_history["B"]).reshape(updates.size, -1),
+)
+axs[0, 0].set_ylabel("$b$")
+axs[0, 1].set_ylabel("$x_1$")
+axs[1, 0].set_ylabel("$f$")
+axs[1, 1].set_ylabel("$V_0$")
+axs[2, 0].set_ylabel("$A$")
+axs[2, 1].set_ylabel("$B$")
 
 plt.show()
