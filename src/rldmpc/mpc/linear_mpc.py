@@ -21,7 +21,7 @@ class LinearMPC:
         cost = 0
         constraints = [x[:, [0]] == x0]
         for k in range(N):
-            #constraints += [s[:, [k]] == 0]  # uncomment to force hard state constraints
+            # constraints += [s[:, [k]] == 0]  # uncomment to force hard state constraints
 
             cost += (
                 cp.quad_form(x[:, [k]], Q_x)
@@ -38,7 +38,7 @@ class LinearMPC:
                 x_bnd[0] - s[:, [k]] <= x[:, [k]],
                 x[:, [k]] <= x_bnd[1] + s[:, [k]],
             ]  # soft bounds on state
-            constraints += [s[:, [k]] >= 0] # positive slack constraint
+            constraints += [s[:, [k]] >= 0]  # positive slack constraint
 
         cost += cp.quad_form(x[:, [N]], Q_x)  # terminal cost
         cost += w.T @ s[:, [N]]  # terminal viol pnlty
@@ -46,7 +46,7 @@ class LinearMPC:
             x_bnd[0] - s[:, [N]] <= x[:, [N]],
             x[:, [N]] <= x_bnd[1] + s[:, [N]],
         ]  # soft terminal cnstrt
-        constraints += [s[:, [N]] >= 0] # terminal positive slack constraint
+        constraints += [s[:, [N]] >= 0]  # terminal positive slack constraint
         objective = cp.Minimize(cost)
 
         # create opt problem instance
@@ -80,6 +80,6 @@ class LinearMPC:
 
 if __name__ == "__main__":
     pass
-    #mpc = LinearMPC(2, 1, 10, np.eye(2), np.eye(1), np.eye(2), np.eye(1))
-    #print(mpc.solve_mpc(x0=np.ones((2, 1))))
-    #print(mpc.solve_mpc(x0=2 * np.zeros((2, 1))))
+    # mpc = LinearMPC(2, 1, 10, np.eye(2), np.eye(1), np.eye(2), np.eye(1))
+    # print(mpc.solve_mpc(x0=np.ones((2, 1))))
+    # print(mpc.solve_mpc(x0=2 * np.zeros((2, 1))))

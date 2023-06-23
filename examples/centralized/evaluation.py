@@ -99,7 +99,7 @@ class LtiNetwork(gym.Env):
         """Resets the states of the LTI network."""
         super().reset(seed=seed, options=options)
         self.x = self.np_random.random((self.nx, 1))
-        #self.x = np.tile([0, 0.15], n).reshape(self.nx, 1)
+        # self.x = np.tile([0, 0.15], n).reshape(self.nx, 1)
         return self.x, {}
 
     def get_stage_cost(
@@ -125,7 +125,7 @@ class LtiNetwork(gym.Env):
 
         for i in range(n):
             noise = self.np_random.uniform(*e_bnd)
-            x_new[2*i] += noise
+            x_new[2 * i] += noise
 
         self.x = x_new
         r = self.get_stage_cost(self.x, action)
@@ -141,9 +141,9 @@ if __name__ == "__main__":
     A_l = np.array([[1, 0.25], [0, 1]])  # agent state-space matrix A
     B_l = np.array([[0.0312], [0.25]])  # agent state-space matrix B
     A_c = np.array([[0, 0], [0, 0]])  # common coupling state-space matrix
-    #A_l = np.array([[0.9, 0.35], [0, 1.1]])  # agent state-space matrix A
-    #B_l = np.array([[0.0813], [0.2]])  # agent state-space matrix B
-    #A_c = np.array([[0, 0], [0, 0.2]])  # common coupling state-space matrix
+    # A_l = np.array([[0.9, 0.35], [0, 1.1]])  # agent state-space matrix A
+    # B_l = np.array([[0.0813], [0.2]])  # agent state-space matrix B
+    # A_c = np.array([[0, 0], [0, 0.2]])  # common coupling state-space matrix
     A, B, x_bnd, w = get_centralized_dynamics(n, nx_l, A_l, B_l, A_c)
 
     env = LtiNetwork()  # create environment

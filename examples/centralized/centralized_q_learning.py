@@ -1,10 +1,11 @@
 import contextlib
 import logging
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import casadi as cs
 import gymnasium as gym
 import matplotlib.pyplot as plt
+
 # import networkx as netx
 import numpy as np
 import numpy.typing as npt
@@ -16,6 +17,9 @@ from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgen
 from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
+from mpcrl.core.exploration import EpsilonGreedyExploration
+from mpcrl.core.experience import ExperienceReplay
+from mpcrl.core.schedulers import ExponentialScheduler
 
 # n = 3  # number of agents
 # seed = 0
@@ -27,7 +31,10 @@ from mpcrl.wrappers.envs import MonitorEpisodes
 #     G = netx.binomial_graph(n, p, seed=seed)
 # Adj = netx.adjacency_matrix(G)  # adjacency matrix as coupling in network
 Adj = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32)
-#Adj = np.array([[0, 1], [1, 0]], dtype=np.int32)
+# Adj = np.array([[0, 1], [1, 0]], dtype=np.int32)
+
+RESPECT_TOPOLOGY_A = True
+RESPECT_TOPOLOGY_B = True
 
 
 def get_centralized_dynamics(
@@ -37,7 +44,7 @@ def get_centralized_dynamics(
     B_l: Union[cs.DM, cs.SX],
     A_c: npt.NDArray[np.floating],
 ) -> tuple[Union[cs.DM, cs.SX], Union[cs.DM, cs.SX]]:
-    """Creates the centralized representation of the dynamics."""
+    """Creates the centralized representation of the dynamics from the real dynamics."""
     A = cs.SX.zeros(n * nx_l, n * nx_l)  # global state-space matrix A
     for i in range(n):
         for j in range(i, n):
@@ -54,6 +61,39 @@ def get_centralized_dynamics(
     return A, B
 
 
+def get_learnable_centralized_dynamics(
+    n: int,
+    nx_l: int,
+    nu_l: int,
+    A_list: List[Union[cs.DM, cs.SX]],
+    B_list: List[Union[cs.DM, cs.SX]],
+    A_c_list: List[List[npt.NDArray[np.floating]]],
+    B_c_list: List[List[npt.NDArray[np.floating]]],
+) -> tuple[Union[cs.DM, cs.SX], Union[cs.DM, cs.SX]]:
+    """Creates the centralized representation of the dynamics from the learnable dynamics."""
+    A = cs.SX.zeros(n * nx_l, n * nx_l)  # global state-space matrix A
+    B = cs.SX.zeros(n * nx_l, n * nu_l)  # global state-space matix B
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                A[nx_l * i : nx_l * (i + 1), nx_l * i : nx_l * (i + 1)] = A_list[i]
+                B[nx_l * i : nx_l * (i + 1), nu_l * i : nu_l * (i + 1)] = B_list[i]
+            else:
+                if Adj[i, j] == 1 or not RESPECT_TOPOLOGY_A:
+                    A[nx_l * i : nx_l * (i + 1), nx_l * j : nx_l * (j + 1)] = A_c_list[
+                        i
+                    ][j]
+                if not RESPECT_TOPOLOGY_B:
+                    B[nx_l * i : nx_l * (i + 1), nu_l * j : nu_l * (j + 1)] = B_c_list[
+                        i
+                    ][j]
+    with contextlib.suppress(RuntimeError):
+        A = cs.evalf(A).full()
+    with contextlib.suppress(RuntimeError):
+        B = cs.evalf(B).full()
+    return A, B
+
+
 class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """A simple discrete-time LTI system affected by noise."""
 
@@ -63,7 +103,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
     A_l = np.array([[0.9, 0.35], [0, 1.1]])  # agent state-space matrix A
     B_l = np.array([[0.0813], [0.2]])  # agent state-space matrix B
-    A_c = np.array([[0, 0], [0, 0.1]])  # common coupling state-space matrix
+    A_c = np.array([[0, 0], [0, -0.1]])  # common coupling state-space matrix
     A, B = get_centralized_dynamics(n, nx_l, A_l, B_l, A_c)
     nx = n * nx_l  # number of states
     nu = n * nu_l  # number of inputs
@@ -118,6 +158,7 @@ class LinearMpc(Mpc[cs.SX]):
     A_l_init = np.asarray([[1, 0.25], [0, 1]])
     B_l_init = np.asarray([[0.0312], [0.25]])
     A_c_l_init = np.array([[0, 0], [0, 0]])
+    B_c_l_init = np.array([[0], [0]])
     A_init, B_init = get_centralized_dynamics(
         LtiSystem.n, LtiSystem.nx_l, A_l_init, B_l_init, A_c_l_init
     )
@@ -128,12 +169,19 @@ class LinearMpc(Mpc[cs.SX]):
         "x_ub": np.tile([1, 0], LtiSystem.n).reshape(-1, 1),
         "b": np.zeros(LtiSystem.nx),
         "f": np.zeros(LtiSystem.nx + LtiSystem.nu),
-        #"A_l": A_l_init,
-        #"B_l": B_l_init,
-        #"A_c_l": A_c_l_init,
-        "A": A_init,
-        "B": B_init
     }
+
+    # add the initial guesses of the learable parameters
+
+    for i in range(LtiSystem.n):
+        learnable_pars_init["A_" + str(i)] = A_l_init
+        learnable_pars_init["B_" + str(i)] = B_l_init
+        for j in range(LtiSystem.n):
+            if i != j:
+                if Adj[i][j] == 1 or not RESPECT_TOPOLOGY_A:
+                    learnable_pars_init["A_c_" + str(i) + "_" + str(j)] = A_c_l_init
+                if not RESPECT_TOPOLOGY_B:
+                    learnable_pars_init["B_c_" + str(i) + "_" + str(j)] = B_c_l_init
 
     def __init__(self) -> None:
         N = self.horizon
@@ -150,17 +198,47 @@ class LinearMpc(Mpc[cs.SX]):
         x_ub = self.parameter("x_ub", (nx,))
         b = self.parameter("b", (nx, 1))
         f = self.parameter("f", (nx + nu, 1))
-        # to learn params individually
 
-        #A_l = self.parameter("A_l", (LtiSystem.nx_l, LtiSystem.nx_l))
-        #B_l = self.parameter("B_l", (LtiSystem.nx_l, LtiSystem.nu_l))
-        #A_c_l = self.parameter("A_c_l", (LtiSystem.nx_l, LtiSystem.nx_l))
-        #A, B = get_centralized_dynamics(LtiSystem.n, LtiSystem.nx_l, A_l, B_l, A_c_l)
+        # learn parameters with topology knowledge
 
-        # to learn all params together
+        A_list = []
+        B_list = []
+        A_c_list: List[list] = []
+        B_c_list: List[list] = []
+        for i in range(LtiSystem.n):
+            A_list.append(
+                self.parameter("A_" + str(i), (LtiSystem.nx_l, LtiSystem.nx_l))
+            )
+            B_list.append(
+                self.parameter("B_" + str(i), (LtiSystem.nx_l, LtiSystem.nu_l))
+            )
 
-        A = self.parameter("A", (LtiSystem.nx, LtiSystem.nx))
-        B = self.parameter("B", (LtiSystem.nx, LtiSystem.nu))
+            A_c_list.append([])
+            B_c_list.append([])
+            for j in range(LtiSystem.n):
+                A_c_list[i].append(None)
+                B_c_list[i].append(None)
+                if i != j:
+                    if Adj[i][j] == 1 or not RESPECT_TOPOLOGY_A:
+                        A_c_list[i][j] = self.parameter(
+                            "A_c_" + str(i) + "_" + str(j),
+                            (LtiSystem.nx_l, LtiSystem.nx_l),
+                        )
+                    if not RESPECT_TOPOLOGY_B:
+                        B_c_list[i][j] = self.parameter(
+                            "B_c_" + str(i) + "_" + str(j),
+                            (LtiSystem.nx_l, LtiSystem.nu_l),
+                        )
+
+        A, B = get_learnable_centralized_dynamics(
+            LtiSystem.n,
+            LtiSystem.nx_l,
+            LtiSystem.nu_l,
+            A_list,
+            B_list,
+            A_c_list,
+            B_c_list,
+        )
 
         # variables (state, action, slack)
         x, _ = self.state("x", nx)
@@ -221,17 +299,28 @@ learnable_pars = LearnableParametersDict[cs.SX](
     )
 )
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(10e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgent(
             mpc=mpc,
             learnable_parameters=learnable_pars,
             discount_factor=mpc.discount_factor,
-            update_strategy=1,
-            learning_rate=5e-2,
+            update_strategy=50,
+            #learning_rate=4e-2,
+            learning_rate=ExponentialScheduler(4e-2, factor=0.99),
             hessian_type="approx",
             record_td_errors=True,
+            exploration=EpsilonGreedyExploration(
+                epsilon=ExponentialScheduler(0.5, factor=0.9),
+                strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+            ),
+            experience=ExperienceReplay(
+               maxlen=200,
+               sample_size=0.5,
+               include_latest= 0.1,
+               seed=0
+            )
         )
     ),
     level=logging.DEBUG,
@@ -279,14 +368,14 @@ axs[0, 1].plot(
 axs[1, 0].plot(updates, np.asarray(agent.updates_history["f"]))
 axs[1, 1].plot(updates, np.squeeze(agent.updates_history["V0"]))
 axs[2, 0].plot(
-    updates, np.asarray(agent.updates_history["A"]).reshape(updates.size, -1)
+    updates, np.asarray(agent.updates_history["A_0"]).reshape(updates.size, -1)
 )
-#axs[2, 0].plot(
-#    updates, np.asarray(agent.updates_history["A_c_l"]).reshape(updates.size, -1)
-#)
+axs[2, 0].plot(
+    updates, np.asarray(agent.updates_history["A_c_0_1"]).reshape(updates.size, -1)
+)
 axs[2, 1].plot(
     updates,
-    np.asarray(agent.updates_history["B"]).reshape(updates.size, -1),
+    np.asarray(agent.updates_history["B_0"]).reshape(updates.size, -1),
 )
 axs[0, 0].set_ylabel("$b$")
 axs[0, 1].set_ylabel("$x_1$")
