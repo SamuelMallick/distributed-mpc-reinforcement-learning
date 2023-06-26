@@ -299,7 +299,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
     )
 )
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(10e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgent(
@@ -307,7 +307,7 @@ agent = Log(  # type: ignore[var-annotated]
             learnable_parameters=learnable_pars,
             discount_factor=mpc.discount_factor,
             update_strategy=50,
-            #learning_rate=4e-2,
+            # learning_rate=4e-2,
             learning_rate=ExponentialScheduler(4e-2, factor=0.99),
             hessian_type="approx",
             record_td_errors=True,
@@ -316,11 +316,8 @@ agent = Log(  # type: ignore[var-annotated]
                 strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
             ),
             experience=ExperienceReplay(
-               maxlen=200,
-               sample_size=0.5,
-               include_latest= 0.1,
-               seed=0
-            )
+                maxlen=200, sample_size=0.5, include_latest=0.1, seed=0
+            ),
         )
     ),
     level=logging.DEBUG,

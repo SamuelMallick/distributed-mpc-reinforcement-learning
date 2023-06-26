@@ -1,6 +1,6 @@
 import numpy as np
 import cvxpy as cp
-
+import joblib
 
 def g_map(Adj: np.ndarray):
     """Construct the ADMM mapping from local to global variables from an adjacency matrix."""
@@ -35,7 +35,9 @@ def admm_inner(
     inner_problem = cp.Problem(obj, constraints)
 
     inner_problem.solve()
-    return x.value
+
+    dual_vals = [constraints[i].dual_value for i in range(len(constraints))]
+    return x.value, dual_vals
 
 
 def admm(
@@ -46,8 +48,8 @@ def admm(
 ):
     """Calculates the ADMM solution to the the optimisation problem given."""
 
-    iters = 1  # number of iterations for the algorithm
-    rho = 0.5  # penalty co-efficient
+    iters = 100  # number of iterations for the algorithm
+    rho = 0.8  # penalty co-efficient
 
     n = len(G)  # number of agents
     nx_l = x_list[0].shape[0]  # dimension of local vars
@@ -55,17 +57,31 @@ def admm(
     # create auxillary vars: y - lagrange multipliers for consensus constraints, z - global vars, and temporary x vars - x_temp
 
     y_list: list[np.ndarray] = []
-    x_temp_list: list[np.ndarray] = []
+    x_temp_list: list[np.ndarray] = []  # stores the intermediate numerical values for x
+    dual_temp_list: list[np.ndarray] = []  # dual vals of from inner probs
     for i in range(n):
         y_list.append(np.zeros(x_list[i].shape))
         x_temp_list.append(np.zeros(x_list[i].shape))
+        dual_temp_list.append(
+            np.zeros((constraint_list[i][0].shape[0], len(constraint_list[i])))
+        )
     z = np.zeros((nx_l, n))
-
 
     for iter in range(iters):
         # x-update - TODO parallelise
+        #results = joblib.Parallel(n_jobs=n)(joblib.delayed(admm_inner)(
+        #    x_list[i],
+        #    cost_list[i],
+        #    constraint_list[i],
+        #    y_list[i],
+        #    z[:, [j for j in G[i]]],
+        #    rho,
+        #) for i in range(n))
+        
+        #for i in range(n): x_temp_list[i], dual_temp_list[i] = results[i]
+        
         for i in range(n):
-            x_temp_list[i] = admm_inner(
+            x_temp_list[i], dual_temp_list[i] = admm_inner(
                 x_list[i],
                 cost_list[i],
                 constraint_list[i],
@@ -73,27 +89,28 @@ def admm(
                 z[:, [j for j in G[i]]],
                 rho,
             )
-
+        
         # z-update -> essentially an averaging of all agents' optinions on each z
 
         for i in range(n):  # looping through each global var associated with each agent
             count = 0
             sum = np.zeros((nx_l, 1))
             for j in range(n):  # looping through agents again to get each's optinion
-                if i in G[j]:   # if agent j has an opinion on the value of agent i's local var
+                if (
+                    i in G[j]
+                ):  # if agent j has an opinion on the value of agent i's local var
                     count += 1
                     sum += x_temp_list[j][:, [G[j].index(i)]]
-            z[:, [i]] = sum/count # average the opinions
+            z[:, [i]] = sum / count  # average the opinions
 
         # y-update - TODO parallelise
 
-        #for i in range(n):
+        for i in range(n):
+            z_temp = z[:, [j for j in G[i]]]  # global vars relevant for agent i
+            y_list[i] = y_list[i] + rho * (x_temp_list[i] - z_temp)
 
-
-
-        
-
-
+    print()
+    return [x_list[i].value for i in range(n)], dual_temp_list
 
 
 if __name__ == "__main__":
@@ -149,4 +166,28 @@ if __name__ == "__main__":
         print("d_" + str(i + 1) + ": " + str(constraints_glob[i].dual_value))
     print("------------------------")
 
-    admm(x_list, cost_list, constraint_list, G)
+    x_list_admm, dual_list_admm = admm(x_list, cost_list, constraint_list, G)
+    print("------------------------")
+    print("ADMM solution")
+    x_admm_opt = np.array([x_list_admm[i][:, G[i].index(i)] for i in range(n)]).T
+    print("x: " + str(x_admm_opt))
+    for i in range(n):
+        print("d_" + str(i + 1) + ": " + str(dual_list_admm[i]))
+    print("------------------------")
+
+    print("------------------------")
+    print("Errors")
+    print("x: " + str(np.linalg.norm(x_glob.value - x_admm_opt)))
+    print(
+        "d: "
+        + str(
+            np.sum(
+                [
+                    np.linalg.norm(
+                        constraints_glob[i].dual_value - dual_list_admm[i][0]
+                    )
+                    for i in range(n)
+                ]
+            )
+        )
+    )
