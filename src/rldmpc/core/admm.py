@@ -1,6 +1,6 @@
 import numpy as np
 import cvxpy as cp
-import joblib
+
 
 def g_map(Adj: np.ndarray):
     """Construct the ADMM mapping from local to global variables from an adjacency matrix."""
@@ -69,17 +69,7 @@ def admm(
 
     for iter in range(iters):
         # x-update - TODO parallelise
-        #results = joblib.Parallel(n_jobs=n)(joblib.delayed(admm_inner)(
-        #    x_list[i],
-        #    cost_list[i],
-        #    constraint_list[i],
-        #    y_list[i],
-        #    z[:, [j for j in G[i]]],
-        #    rho,
-        #) for i in range(n))
-        
-        #for i in range(n): x_temp_list[i], dual_temp_list[i] = results[i]
-        
+
         for i in range(n):
             x_temp_list[i], dual_temp_list[i] = admm_inner(
                 x_list[i],
@@ -89,7 +79,7 @@ def admm(
                 z[:, [j for j in G[i]]],
                 rho,
             )
-        
+
         # z-update -> essentially an averaging of all agents' optinions on each z
 
         for i in range(n):  # looping through each global var associated with each agent
@@ -109,7 +99,6 @@ def admm(
             z_temp = z[:, [j for j in G[i]]]  # global vars relevant for agent i
             y_list[i] = y_list[i] + rho * (x_temp_list[i] - z_temp)
 
-    print()
     return [x_list[i].value for i in range(n)], dual_temp_list
 
 
