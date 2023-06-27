@@ -1,3 +1,4 @@
+from copy import deepcopy
 from mpcrl.agents.agent import ActType, ObsType, SymType
 from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
 from typing import Any, Collection, Dict, Literal, Optional, Union
@@ -74,20 +75,20 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
                     LstdQLearningAgent(
                         mpc_dist_list[i],
-                        update_strategy,
+                        deepcopy(update_strategy),
                         discount_factor,
-                        learning_rate,
+                        deepcopy(learning_rate),
                         learnable_dist_parameters_list[i],
                         fixed_dist_parameters_list[i],
-                        exploration,
-                        experience,
+                        deepcopy(exploration),
+                        deepcopy(experience),
                         max_percentage_update,
                         warmstart,
                         hessian_type,
                         record_td_errors,
                         cho_maxiter,
-                        cho_solve_kwargs,
-                        name,
+                        cho_solve_kwargs.copy(),
+                        f"{name}_{i}",
                     )
                 )
             print(self.agents[0].fixed_parameters)
@@ -122,9 +123,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             return super().train_one_episode(env, episode, init_state, raises)
         else:
             # solve for the first action
-            action_cent, solV_cent = self.state_value(
-                state, False
-            )  # get centralised result for comparrison
+            action, solV = self.state_value(state, False)   # get centralised result for comparrison
 
             return super().train_one_episode(env, episode, init_state, raises)
 

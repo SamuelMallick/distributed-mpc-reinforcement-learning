@@ -388,16 +388,15 @@ class MPCAdmm(Mpc[cs.SX]):
         # objective
         gammapowers = cs.DM(gamma ** np.arange(N)).T
         self.minimize(
-            cs.sum1(V0)
+            V0
             + cs.sum2(f.T @ cs.vertcat(x[my_slice, :-1], u))
             + 0.5
             * cs.sum2(
                 gammapowers
-                * (cs.sum1(x[my_slice, :-1] ** 2) + 0.5 * cs.sum1(u**2) + w.T @ s)
+                * (cs.sumsqr(x[my_slice, :-1]) + 0.5 * cs.sumsqr(u) + w.T @ s)
             )
-            + cs.sum2(
-                cs.sum1(y.T @ (x[:, :-1] - z))
-            )  # TODO is this doing the right thing?
+            + cs.trace(y.T @ (x[:, :-1] - z))  # TODO is this doing the right thing?
+            # + sum((y[:, k].T @ (x[:, k] - z[:, k])) for k in range(N))  # TODO: check the same as above
             + (self.rho / 2) * cs.sumsqr(x[:, :-1] - z)
         )
 
