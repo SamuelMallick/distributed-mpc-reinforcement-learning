@@ -109,7 +109,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the LTI system."""
         super().reset(seed=seed, options=options)
-        self.x = np.tile([0, 0.15], self.n).reshape(self.nx, 1)
+        self.x = np.tile([0, 0.15], self.n).reshape(self.nx, 1) #+ np.random.rand(6, 1)
         return self.x, {}
 
     def get_stage_cost(self, state: npt.NDArray[np.floating], action: float) -> float:
@@ -246,7 +246,7 @@ class LinearMpc(Mpc[cs.SX]):
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
             * cs.sum2(
-                gammapowers * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + w @ s)
+                gammapowers * (cs.sum1(x[:, :-1]**2) + 0.5 * cs.sum1(u**2) + w @ s)
             )
         )
 
@@ -308,8 +308,8 @@ class MPCAdmm(Mpc[cs.SX]):
             "x_ub": np.array([1, 0]).reshape(-1, 1),
             "b": np.zeros(LtiSystem.nx_l),
             "f": np.zeros(LtiSystem.nx_l + LtiSystem.nu_l),
-            "A": np.zeros((LtiSystem.nx_l, LtiSystem.nx_l)),
-            "B": np.zeros((LtiSystem.nx_l, LtiSystem.nu_l)),
+            "A": self.A_init,
+            "B": self.B_init,
         }
 
         self.num_neighbours = num_neighbours
@@ -348,9 +348,14 @@ class MPCAdmm(Mpc[cs.SX]):
             nx_l * my_index, nx_l * (my_index + 1)
         )  # used to slice the local state out of x
 
-        x, _, _ = self.variable(
-            "x", (nx_l * (num_neighbours + 1), N + 1)
-        )  # local state and coupling together
+        x, _ = self.state("x", nx_l)  # local state
+        x_c, _, _ = self.variable("x_c", (nx_l * (num_neighbours), N))  # coupling
+
+        # adding them together as the full decision var
+        x_cat = cs.vertcat(
+            x_c[: (my_index * nx_l), :], x[:, :-1], x_c[(my_index * nx_l) :, :]
+        )
+
         # TODO here assumed action bounds are homogenous
         u, _ = self.action(
             "u",
@@ -363,9 +368,8 @@ class MPCAdmm(Mpc[cs.SX]):
         x_c_list = (
             []
         )  # store the bits of x that are couplings in a list for ease of access
-        for i in range(num_neighbours + 1):
-            if i != my_index:
-                x_c_list.append(x[nx_l * i : nx_l * (i + 1), :])
+        for i in range(num_neighbours):
+            x_c_list.append(x_c[nx_l * i : nx_l * (i + 1), :])
 
         # dynamics - added manually due to coupling
 
@@ -375,32 +379,32 @@ class MPCAdmm(Mpc[cs.SX]):
                 coup += A_c_list[i] @ x_c_list[i][:, [k]]
             self.constraint(
                 "dynam_" + str(k),
-                x[my_slice, [k + 1]],
+                x[:, [k + 1]],
                 "==",
-                A @ x[my_slice, [k]] + B @ u[:, [k]] + coup + b,
+                A @ x[:, [k]] + B @ u[:, [k]] + coup + b,
             )
 
         # other constraints
 
-        self.constraint("x_lb", x_bnd[0] + x_lb - s, "<=", x[my_slice, 1:])
-        self.constraint("x_ub", x[my_slice, 1:], "<=", x_bnd[1] + x_ub + s)
+        self.constraint("x_lb", x_bnd[0] + x_lb - s, "<=", x[:, 1:])
+        self.constraint("x_ub", x[:, 1:], "<=", x_bnd[1] + x_ub + s)
 
         # objective
         gammapowers = cs.DM(gamma ** np.arange(N)).T
         self.minimize(
             V0
-            + cs.sum2(f.T @ cs.vertcat(x[my_slice, :-1], u))
+            + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
             * cs.sum2(
-                gammapowers
-                * (cs.sumsqr(x[my_slice, :-1]) + 0.5 * cs.sumsqr(u) + w.T @ s)
+                gammapowers * (cs.sum1(x[:, :-1]**2) + 0.5 * cs.sum1(u**2) + w.T @ s)
             )
-            + cs.trace(y.T @ (x[:, :-1] - z))  # TODO is this doing the right thing?
-            # + sum((y[:, k].T @ (x[:, k] - z[:, k])) for k in range(N))  # TODO: check the same as above
-            + (self.rho / 2) * cs.sumsqr(x[:, :-1] - z)
+            + sum((y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N))  # TODO: check the same as above
+            + sum(((self.rho / 2)*cs.norm_2(x_cat[:, [k]] - z[:, [k]])**2) for k in range(N))
         )
 
-        self.x = x  # assigning it to class so that the dimension can be retreived later by admm procedure
+        self.x_dim = (
+            x_cat.shape
+        )  # assigning it to class so that the dimension can be retreived later by admm procedure
         self.nx_l = nx_l
 
         # solver
@@ -458,6 +462,7 @@ env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e1)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
+            rho=MPCAdmm.rho,
             n=LtiSystem.n,
             G=G,
             centralised_flag=False,
