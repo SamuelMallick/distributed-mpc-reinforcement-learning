@@ -28,6 +28,7 @@ Adj = np.array(
 )  # adjacency matrix of coupling in network
 G = g_map(Adj)  # mapping from global var to local var indexes for ADMM
 
+
 def get_centralized_dynamics(
     n: int,
     nx_l: int,
@@ -299,16 +300,16 @@ class MPCAdmm(Mpc[cs.SX]):
         nlp = Nlp[cs.SX]()
         super().__init__(nlp, N)
 
-        #learnable pars
+        # learnable pars
 
         self.learnable_pars_init = {
-        "V0": np.zeros((1, 1)),
-        "x_lb": np.array([0, 0]).reshape(-1, 1),
-        "x_ub": np.array([1, 0]).reshape(-1, 1),
-        "b": np.zeros(LtiSystem.nx_l),
-        "f": np.zeros(LtiSystem.nx_l + LtiSystem.nu_l),
-        "A": np.zeros((LtiSystem.nx_l, LtiSystem.nx_l)),
-        "B": np.zeros((LtiSystem.nx_l, LtiSystem.nu_l)),
+            "V0": np.zeros((1, 1)),
+            "x_lb": np.array([0, 0]).reshape(-1, 1),
+            "x_ub": np.array([1, 0]).reshape(-1, 1),
+            "b": np.zeros(LtiSystem.nx_l),
+            "f": np.zeros(LtiSystem.nx_l + LtiSystem.nu_l),
+            "A": np.zeros((LtiSystem.nx_l, LtiSystem.nx_l)),
+            "B": np.zeros((LtiSystem.nx_l, LtiSystem.nu_l)),
         }
 
         self.num_neighbours = num_neighbours
@@ -400,6 +401,9 @@ class MPCAdmm(Mpc[cs.SX]):
             + (self.rho / 2) * cs.sumsqr(x[:, :-1] - z)
         )
 
+        self.x = x  # assigning it to class so that the dimension can be retreived later by admm procedure
+        self.nx_l = nx_l
+
         # solver
 
         opts = {
@@ -437,19 +441,18 @@ mpc_dist_list: list[Mpc] = []
 learnable_dist_parameters_list: list[LearnableParametersDict] = []
 fixed_dist_parameters_list: list = []
 for i in range(LtiSystem.n):
-    mpc_dist_list.append(MPCAdmm(num_neighbours=len(G[i])-1, my_index=G[i].index(i)))
+    mpc_dist_list.append(MPCAdmm(num_neighbours=len(G[i]) - 1, my_index=G[i].index(i)))
     learnable_dist_parameters_list.append(
         LearnableParametersDict[cs.SX](
             (
-                LearnableParameter(name, val.shape, val, sym=mpc_dist_list[i].parameters[name])
+                LearnableParameter(
+                    name, val.shape, val, sym=mpc_dist_list[i].parameters[name]
+                )
                 for name, val in mpc_dist_list[i].learnable_pars_init.items()
             )
         )
     )
-    fixed_dist_parameters_list.append(
-        mpc_dist_list[i].fixed_pars_init
-    )
-
+    fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
 env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e1)))
@@ -457,11 +460,12 @@ agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
             n=LtiSystem.n,
+            G=G,
             centralised_flag=False,
             mpc_cent=mpc,
             learnable_parameters=learnable_pars,
             mpc_dist_list=mpc_dist_list,
-            learnable_dist_parameters_list = learnable_dist_parameters_list,
+            learnable_dist_parameters_list=learnable_dist_parameters_list,
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=50,

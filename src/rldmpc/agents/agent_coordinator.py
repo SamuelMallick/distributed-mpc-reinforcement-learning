@@ -6,6 +6,7 @@ from gymnasium import Env
 from mpcrl import LstdQLearningAgent
 from mpcrl.agents.agent import ActType, ObsType
 import numpy.typing as npt
+import numpy as np
 from mpcrl.agents.lstd_q_learning import ExpType
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.exploration import ExplorationStrategy
@@ -29,6 +30,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         mpc_dist_list: list[Mpc[SymType]],
         learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
         fixed_dist_parameters_list: list,
+        G: list[list[int]],
         fixed_parameters: Union[
             None, Dict[str, npt.ArrayLike], Collection[Dict[str, npt.ArrayLike]]
         ] = None,
@@ -69,7 +71,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         if not centralised_flag:  # act as a coordinator of learning agents
             self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
-                self.agents.append( # create agents here, passing the mpc, learnable, and fixed params from the lists
+                self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
                     LstdQLearningAgent(
                         mpc_dist_list[i],
                         update_strategy,
@@ -88,6 +90,21 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         name,
                     )
                 )
+            print(self.agents[0].fixed_parameters)
+            # vars for admm procedures
+
+            y_list: list[np.ndarray] = []  # dual vars
+            x_temp_list: list[np.ndarray] = []  # intermediate numerical values for x
+            dual_temp_list: list[np.ndarray] = []  # dual vals of from inner probs
+            for i in range(n):
+                x_dim = mpc_dist_list[i].x.shape
+                y_list.append(
+                    np.zeros((x_dim[0], x_dim[1] - 1))
+                )  # -1 as x_dim goes to N+1
+                x_temp_list.append(np.zeros(x_dim))
+            z = np.zeros(
+                (n * mpc_dist_list[0].nx_l, x_dim[1])
+            )  # all states of all agents stacked, along horizon
 
     def train_one_episode(
         self,
@@ -105,8 +122,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             return super().train_one_episode(env, episode, init_state, raises)
         else:
             # solve for the first action
-            action, solV = self.state_value(state, False)   # get centralised result for comparrison
-            
+            action_cent, solV_cent = self.state_value(
+                state, False
+            )  # get centralised result for comparrison
+
             return super().train_one_episode(env, episode, init_state, raises)
 
     def distributed_state_value(state):
