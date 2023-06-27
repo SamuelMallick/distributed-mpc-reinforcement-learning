@@ -105,6 +105,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             self.nx_l = mpc_dist_list[
                 0
             ].nx_l  # used to seperate states into each agents
+            self.nu_l = mpc_dist_list[
+                0
+            ].nu_l  # used to seperate control into each agents
             self.y_list: list[np.ndarray] = []  # dual vars
             self.x_temp_list: list[
                 np.ndarray
@@ -128,8 +131,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
     # need to override train method to manually reset all agent MPCs
     def train(self, env, episodes, seed):
-        for agent in self.agents:
-            agent.reset(seed)
+        if not self.centralised_flag:
+            for agent in self.agents:
+                agent.reset(seed)
         super().train(env, episodes, seed)
 
     def evaluate(
@@ -167,13 +171,80 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if not solV.success:
                 self.on_mpc_failure(episode, None, solV.status, raises)
 
-            joint_action = self.distributed_state_value(state, episode, raises)
-            return super().train_one_episode(env, episode, init_state, raises)
+            joint_action, solV_list = self.distributed_state_value(
+                state, episode, raises
+            )
+            for i in range(len(self.agents)):
+                if not solV_list[i].success:
+                    self.agents[i].on_mpc_failure(episode, None, solV[i].status, raises)
+
+            while not (truncated or terminated):
+                # compute Q(s,a)
+                solQ = self.action_value(
+                    state, joint_action
+                )  # centralized val from joint action
+                solQ_list = self.distributed_action_value(
+                    state, joint_action, episode, raises
+                )
+
+                # step the system with action computed at the previous iteration
+                new_state, cost, truncated, terminated, _ = env.step(joint_action)
+                self.on_env_step(env, episode, timestep)  # step centralised
+                for agent in self.agents:  # step distributed agents
+                    agent.on_env_step(env, episode, timestep)
+
+                # compute V(s+) and store transition
+                new_action, solV = self.state_value(new_state, False)  # centralised
+                new_joint_action, solV_list = self.distributed_state_value(
+                    new_state, episode, raises
+                )  # distributed
+
+                if not self._try_store_experience(cost, solQ, solV):
+                    self.on_mpc_failure(
+                        episode, timestep, f"{solQ.status}/{solV.status}", raises
+                    )
+
+                # calculate centralised cost from local TODO make this consensus
+                V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
+                Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
+                for i in range(len(self.agents)):  # store experience for agents
+                    object.__setattr__(solV_list[i], "f", V_f)   # overwrite the local costs with the global ones TODO make this nicer
+                    object.__setattr__(solQ_list[i], "f", Q_f)
+
+                    if not self.agents[i]._try_store_experience(
+                        cost, solQ_list[i], solV_list[i]
+                    ):
+                        self.agents[i].on_mpc_failure(
+                            episode,
+                            timestep,
+                            f"{solQ_list[i].status}/{solV_list[i].status}",
+                            raises,
+                        )
+                # increase counters
+                state = new_state
+                joint_action = new_joint_action
+                rewards += float(cost)
+                timestep += 1
+                self.on_timestep_end(env, episode, timestep)
+                for agent in self.agents:
+                    agent.on_timestep_end(env, episode, timestep)
+            return rewards
 
     def distributed_state_value(self, state, episode, raises):
-        loc_actions = [None]*len(self.agents)
-        loc_solV = [None]*len(self.agents)
-        
+        local_action_list, local_sol_list = self.admm(state, episode, raises)
+        return cs.DM(local_action_list), local_sol_list
+
+    def distributed_action_value(self, state, action, episode, raises):
+        local_action_list, local_sol_list = self.admm(
+            state, episode, raises, action=action
+        )
+        return local_sol_list
+
+    def admm(self, state, episode, raises, action=None):
+        """Uses ADMM to solve distributed problem. If actions passed, solves state-action val."""
+        loc_action_list = [None] * len(self.agents)
+        local_sol_list = [None] * len(self.agents)
+
         plot_list = []
 
         for iter in range(self.iters):
@@ -188,17 +259,27 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     self.z_slices[i], :
                 ]  # only pass global vars that are relevant to agent
 
-                loc_actions[i], loc_solV[i] = self.agents[i].state_value(loc_state, False)
-                if not loc_solV[i].success:
-                    self.agents[i].on_mpc_failure(episode, None, loc_solV[i].status, raises)
+                if action is None:
+                    loc_action_list[i], local_sol_list[i] = self.agents[i].state_value(
+                        loc_state, False
+                    )
+                else:
+                    loc_action = action[self.nu_l * i : self.nu_l * (i + 1), :]
+                    local_sol_list[i] = self.agents[i].action_value(
+                        loc_state, loc_action
+                    )
+                if not local_sol_list[i].success:
+                    self.agents[i].on_mpc_failure(
+                        episode, None, local_sol_list[i].status, raises
+                    )
 
                 idx = self.G[i].index(i) * self.nx_l
                 self.x_temp_list[i] = cs.vertcat(  # insert local state into place
-                    loc_solV[i].vals["x_c"][:idx, :],
-                    loc_solV[i].vals["x"][:, :-1],
-                    loc_solV[i].vals["x_c"][idx:, :],
+                    local_sol_list[i].vals["x_c"][:idx, :],
+                    local_sol_list[i].vals["x"][:, :-1],
+                    local_sol_list[i].vals["x_c"][idx:, :],
                 )
-            #plot_list.append(loc_solV[0].vals["x"])
+            # plot_list.append(loc_solV[0].vals["x"])
             # z update -> essentially an averaging of all agents' optinions on each z
             # TODO -> make distributed with consensus
             for i in range(len(self.agents)):  # loop through each agents associated z
@@ -214,9 +295,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                             self.nx_l * (self.G[j].index(i) + 1),
                         )
                         sum += self.x_temp_list[j][x_slice, :]
-                self.z[self.nx_l*i:self.nx_l*(i+1), :] = sum/count
+                self.z[self.nx_l * i : self.nx_l * (i + 1), :] = sum / count
 
-            plot_list.append(loc_solV[1].vals["u"])
+            plot_list.append(local_sol_list[1].vals["u"])
 
             # y update TODO parallelise
             for i in range(len(self.agents)):
@@ -225,10 +306,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 )
 
         plot_list = np.asarray(plot_list)
-        #plt.plot(plot_list[:, :, 2])
-        #plt.show()
-        return loc_actions
-        
+        # plt.plot(plot_list[:, :, 2])
+        # plt.show()
+
+        return loc_action_list, local_sol_list  # return last solutions
 
     def reset_admm_params(self):
         """Reset all vars for admm to zero."""

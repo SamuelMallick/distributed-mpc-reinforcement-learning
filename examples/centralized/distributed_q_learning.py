@@ -109,7 +109,9 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the LTI system."""
         super().reset(seed=seed, options=options)
-        self.x = np.tile([0, 0.15], self.n).reshape(self.nx, 1) #+ np.random.rand(6, 1)
+        self.x = np.tile([0, 0.15], self.n).reshape(
+            self.nx, 1
+        )  # + np.random.rand(6, 1)
         return self.x, {}
 
     def get_stage_cost(self, state: npt.NDArray[np.floating], action: float) -> float:
@@ -246,7 +248,7 @@ class LinearMpc(Mpc[cs.SX]):
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
             * cs.sum2(
-                gammapowers * (cs.sum1(x[:, :-1]**2) + 0.5 * cs.sum1(u**2) + w @ s)
+                gammapowers * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + w @ s)
             )
         )
 
@@ -396,16 +398,23 @@ class MPCAdmm(Mpc[cs.SX]):
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
             * cs.sum2(
-                gammapowers * (cs.sum1(x[:, :-1]**2) + 0.5 * cs.sum1(u**2) + w.T @ s)
+                gammapowers
+                * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + w.T @ s)
             )
-            + sum((y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N))  # TODO: check the same as above
-            + sum(((self.rho / 2)*cs.norm_2(x_cat[:, [k]] - z[:, [k]])**2) for k in range(N))
+            + sum(
+                (y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N)
+            )  # TODO: check the same as above
+            + sum(
+                ((self.rho / 2) * cs.norm_2(x_cat[:, [k]] - z[:, [k]]) ** 2)
+                for k in range(N)
+            )
         )
 
         self.x_dim = (
             x_cat.shape
         )  # assigning it to class so that the dimension can be retreived later by admm procedure
         self.nx_l = nx_l
+        self.nu_l = nu_l
 
         # solver
 
@@ -458,7 +467,7 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e1)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(10e0)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -491,60 +500,61 @@ agent = Log(  # type: ignore[var-annotated]
 
 agent.train(env=env, episodes=1, seed=69)
 
+if True:
+    # plot the results
+    X = env.observations[0].squeeze()
+    U = env.actions[0].squeeze()
+    R = env.rewards[0]
+    time = np.arange(R.size)
+    _, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)
+    axs[0].plot(time, X[:-1, np.arange(0, env.nx, env.nx_l)])
+    axs[1].plot(time, X[:-1, np.arange(1, env.nx, env.nx_l)])
+    axs[2].plot(time, U)
+    for i in range(2):
+        axs[0].axhline(env.x_bnd[i][0], color="r")
+        axs[1].axhline(env.x_bnd[i][1], color="r")
+        axs[2].axhline(env.a_bnd[i][0], color="r")
+    axs[0].set_ylabel("$s_1$")
+    axs[1].set_ylabel("$s_2$")
+    axs[2].set_ylabel("$a$")
 
-# plot the results
-X = env.observations[0].squeeze()
-U = env.actions[0].squeeze()
-R = env.rewards[0]
-time = np.arange(R.size)
-_, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)
-axs[0].plot(time, X[:-1, np.arange(0, env.nx, env.nx_l)])
-axs[1].plot(time, X[:-1, np.arange(1, env.nx, env.nx_l)])
-axs[2].plot(time, U)
-for i in range(2):
-    axs[0].axhline(env.x_bnd[i][0], color="r")
-    axs[1].axhline(env.x_bnd[i][1], color="r")
-    axs[2].axhline(env.a_bnd[i][0], color="r")
-axs[0].set_ylabel("$s_1$")
-axs[1].set_ylabel("$s_2$")
-axs[2].set_ylabel("$a$")
+    _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+    axs[0].plot(agent.td_errors, "o", markersize=1)
+    axs[1].semilogy(R, "o", markersize=1)
+    axs[0].set_ylabel(r"$\tau$")
+    axs[1].set_ylabel("$L$")
 
-_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-axs[0].plot(agent.td_errors, "o", markersize=1)
-axs[1].semilogy(R, "o", markersize=1)
-axs[0].set_ylabel(r"$\tau$")
-axs[1].set_ylabel("$L$")
-
-_, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
-updates = np.arange(len(agent.updates_history["b"]))
-axs[0, 0].plot(updates, np.asarray(agent.updates_history["b"]))
-axs[0, 1].plot(
-    updates,
-    np.concatenate(
-        [
-            np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
-            for n in ("x_lb", "x_ub")
-        ],
-        -1,
-    ),
-)
-axs[1, 0].plot(updates, np.asarray(agent.updates_history["f"]))
-axs[1, 1].plot(updates, np.squeeze(agent.updates_history["V0"]))
-axs[2, 0].plot(
-    updates, np.asarray(agent.updates_history["A_0"]).reshape(updates.size, -1)
-)
-axs[2, 0].plot(
-    updates, np.asarray(agent.updates_history["A_c_0_1"]).reshape(updates.size, -1)
-)
-axs[2, 1].plot(
-    updates,
-    np.asarray(agent.updates_history["B_0"]).reshape(updates.size, -1),
-)
-axs[0, 0].set_ylabel("$b$")
-axs[0, 1].set_ylabel("$x_1$")
-axs[1, 0].set_ylabel("$f$")
-axs[1, 1].set_ylabel("$V_0$")
-axs[2, 0].set_ylabel("$A$")
-axs[2, 1].set_ylabel("$B$")
+if False:
+    _, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
+    updates = np.arange(len(agent.updates_history["b"]))
+    axs[0, 0].plot(updates, np.asarray(agent.updates_history["b"]))
+    axs[0, 1].plot(
+        updates,
+        np.concatenate(
+            [
+                np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
+                for n in ("x_lb", "x_ub")
+            ],
+            -1,
+        ),
+    )
+    axs[1, 0].plot(updates, np.asarray(agent.updates_history["f"]))
+    axs[1, 1].plot(updates, np.squeeze(agent.updates_history["V0"]))
+    axs[2, 0].plot(
+        updates, np.asarray(agent.updates_history["A_0"]).reshape(updates.size, -1)
+    )
+    axs[2, 0].plot(
+        updates, np.asarray(agent.updates_history["A_c_0_1"]).reshape(updates.size, -1)
+    )
+    axs[2, 1].plot(
+        updates,
+        np.asarray(agent.updates_history["B_0"]).reshape(updates.size, -1),
+    )
+    axs[0, 0].set_ylabel("$b$")
+    axs[0, 1].set_ylabel("$x_1$")
+    axs[1, 0].set_ylabel("$f$")
+    axs[1, 1].set_ylabel("$V_0$")
+    axs[2, 0].set_ylabel("$A$")
+    axs[2, 1].set_ylabel("$B$")
 
 plt.show()
