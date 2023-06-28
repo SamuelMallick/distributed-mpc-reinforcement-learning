@@ -276,7 +276,7 @@ class LinearMpc(Mpc[cs.SX]):
 class MPCAdmm(Mpc[cs.SX]):
     """MPC for agent inner prob in ADMM."""
 
-    rho = 0.5
+    rho = 1
 
     horizon = 10
     discount_factor = 0.9
@@ -381,15 +381,15 @@ class MPCAdmm(Mpc[cs.SX]):
                 coup += A_c_list[i] @ x_c_list[i][:, [k]]
             self.constraint(
                 "dynam_" + str(k),
-                x[:, [k + 1]],
-                "==",
                 A @ x[:, [k]] + B @ u[:, [k]] + coup + b,
+                "==",
+                x[:, [k + 1]],
             )
 
         # other constraints
 
-        self.constraint("x_lb", x_bnd[0] + x_lb - s, "<=", x[:, 1:])
-        self.constraint("x_ub", x[:, 1:], "<=", x_bnd[1] + x_ub + s)
+        self.constraint(f"x_lb", x_bnd[0] + x_lb - s, "<=", x[:, 1:])
+        self.constraint(f"x_ub", x[:, 1:], "<=", x_bnd[1] + x_ub + s)
 
         # objective
         gammapowers = cs.DM(gamma ** np.arange(N)).T
@@ -467,7 +467,7 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(10e0)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e2)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -475,23 +475,27 @@ agent = Log(  # type: ignore[var-annotated]
             n=LtiSystem.n,
             G=G,
             centralised_flag=False,
+            centralised_debug=False,
             mpc_cent=mpc,
             learnable_parameters=learnable_pars,
             mpc_dist_list=mpc_dist_list,
             learnable_dist_parameters_list=learnable_dist_parameters_list,
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
-            update_strategy=50,
-            learning_rate=ExponentialScheduler(4e-2, factor=0.99),
-            hessian_type="approx",
+            update_strategy=1,
+            learning_rate=4e-5,
+            # ExponentialScheduler(4e-5, factor=1),
+            hessian_type="none",
             record_td_errors=True,
-            exploration=EpsilonGreedyExploration(
-                epsilon=ExponentialScheduler(0.5, factor=0.9),
-                strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
-            ),
-            experience=ExperienceReplay(
-                maxlen=200, sample_size=0.5, include_latest=0.1, seed=0
-            ),
+            exploration=None,  # TODO re-add exploration
+            # EpsilonGreedyExploration(
+            #    epsilon=ExponentialScheduler(0.5, factor=0.9),
+            #    strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+            # ),
+            experience=None,
+            # ExperienceReplay(
+            #    maxlen=200, sample_size=0.5, include_latest=0.1, seed=0
+            # ),
         )
     ),
     level=logging.DEBUG,

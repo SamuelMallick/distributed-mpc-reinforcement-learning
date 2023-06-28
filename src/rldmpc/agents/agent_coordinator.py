@@ -16,6 +16,7 @@ from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
+from joblib import Parallel, delayed
 
 import matplotlib.pyplot as plt
 
@@ -23,7 +24,7 @@ import matplotlib.pyplot as plt
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
     """Coordinator to handle the communication and learning of a multi-agent q-learning system."""
 
-    iters = 100  # number of iters in ADMM procedure
+    iters = 50  # number of iters in ADMM procedure
 
     def __init__(
         self,
@@ -51,10 +52,12 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         cho_solve_kwargs: Optional[Dict[str, Any]] = None,
         name: Optional[str] = None,
         centralised_flag: bool = False,
+        centralised_debug: bool = False,
     ) -> None:
         """Instantiates the coordinator. If centralised_flag is true it acts as a LstdQLearningAgent."""
         # TODO parameter descriptions
         self.centralised_flag = centralised_flag
+        self.centralised_debug = centralised_debug
         self.n = n
         self.G = G
         self.rho = rho
@@ -88,7 +91,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         deepcopy(learning_rate),
                         learnable_dist_parameters_list[i],
                         fixed_dist_parameters_list[i],
-                        None,
+                        None,  # TODO re-add exploration
                         deepcopy(experience),
                         max_percentage_update,
                         warmstart,
@@ -101,6 +104,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 )
 
             # vars for admm procedures
+            self.N = mpc_cent.horizon
 
             self.nx_l = mpc_dist_list[
                 0
@@ -177,16 +181,47 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             for i in range(len(self.agents)):
                 if not solV_list[i].success:
                     self.agents[i].on_mpc_failure(episode, None, solV[i].status, raises)
-
+            iter_count = 0
             while not (truncated or terminated):
+                iter_count += 1
+                print(iter_count)
                 # compute Q(s,a)
-                solQ = self.action_value(
-                    state, joint_action
-                )  # centralized val from joint action
                 solQ_list = self.distributed_action_value(
                     state, joint_action, episode, raises
                 )
 
+                # compare dual vars of centralised and distributed sols
+                # dynamics
+                if self.centralised_debug:
+                    solQ = self.action_value(
+                        state, joint_action
+                    )  # centralized val from joint action
+                    cent_duals_dyn = solQ.dual_vals["lam_g_dyn"]
+                    dist_duals_list_dyn: list = []
+                    cent_duals_list_dyn: list = []
+                    for i in range(len(self.agents)):
+                        dist_duals_list_dyn.append(np.zeros((self.nx_l, self.N)))
+                        cent_duals_list_dyn.append(np.zeros((self.nx_l, self.N)))
+                        for k in range(self.N):  # TODO get rid of hard coded horizon
+                            dist_duals_list_dyn[i][:, [k]] = np.array(
+                                solQ_list[i].dual_vals[f"lam_g_dynam_{k}"]
+                            )
+                            cent_duals_list_dyn[i][:, [k]] = np.array(
+                                cent_duals_dyn[
+                                    (
+                                        self.nx_l * len(self.agents) * k + self.nx_l * i
+                                    ) : (
+                                        self.nx_l * len(self.agents) * k
+                                        + self.nx_l * (i + 1)
+                                    )
+                                ]
+                            )
+                    dynam_duals_error = np.linalg.norm(
+                        cent_duals_list_dyn[0] - dist_duals_list_dyn[0]
+                    )
+                    if dynam_duals_error > 1e-04:
+                        # exit('Duals of dynamics werent accurate!')
+                        print("Duals of dynamics werent accurate!")
                 # step the system with action computed at the previous iteration
                 new_state, cost, truncated, terminated, _ = env.step(joint_action)
                 self.on_env_step(env, episode, timestep)  # step centralised
@@ -194,21 +229,24 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     agent.on_env_step(env, episode, timestep)
 
                 # compute V(s+) and store transition
-                new_action, solV = self.state_value(new_state, False)  # centralised
+                if self.centralised_debug:
+                    new_action, solV = self.state_value(new_state, False)  # centralised
+                    if not self._try_store_experience(cost, solQ, solV):
+                        self.on_mpc_failure(
+                            episode, timestep, f"{solQ.status}/{solV.status}", raises
+                        )
+
                 new_joint_action, solV_list = self.distributed_state_value(
                     new_state, episode, raises
                 )  # distributed
-
-                if not self._try_store_experience(cost, solQ, solV):
-                    self.on_mpc_failure(
-                        episode, timestep, f"{solQ.status}/{solV.status}", raises
-                    )
 
                 # calculate centralised cost from local TODO make this consensus
                 V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
                 Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
                 for i in range(len(self.agents)):  # store experience for agents
-                    object.__setattr__(solV_list[i], "f", V_f)   # overwrite the local costs with the global ones TODO make this nicer
+                    object.__setattr__(
+                        solV_list[i], "f", V_f
+                    )  # overwrite the local costs with the global ones TODO make this nicer
                     object.__setattr__(solQ_list[i], "f", Q_f)
 
                     if not self.agents[i]._try_store_experience(
@@ -225,7 +263,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 joint_action = new_joint_action
                 rewards += float(cost)
                 timestep += 1
-                self.on_timestep_end(env, episode, timestep)
+                if self.centralised_debug:
+                    self.on_timestep_end(env, episode, timestep)
                 for agent in self.agents:
                     agent.on_timestep_end(env, episode, timestep)
             return rewards
