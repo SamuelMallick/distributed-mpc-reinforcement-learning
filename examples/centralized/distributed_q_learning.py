@@ -23,9 +23,19 @@ from mpcrl.core.schedulers import ExponentialScheduler
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
 from rldmpc.core.admm import g_map
 
+import pickle
+import datetime
+
+CENTRALISED = False
+
 Adj = np.array(
     [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
 )  # adjacency matrix of coupling in network
+# build a consensus matrix
+eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
+D_in = np.array([[1, 0, 0], [0, 2, 0], [0, 0, 1]])  # Hard coded D_in matrix from Adj
+L = D_in - Adj  # graph laplacian
+P = np.eye(3) - eps*L   # consensus matrix
 G = g_map(Adj)  # mapping from global var to local var indexes for ADMM
 
 
@@ -474,7 +484,8 @@ agent = Log(  # type: ignore[var-annotated]
             rho=MPCAdmm.rho,
             n=LtiSystem.n,
             G=G,
-            centralised_flag=False,
+            P = P,
+            centralised_flag=CENTRALISED,
             centralised_debug=False,
             mpc_cent=mpc,
             learnable_parameters=learnable_pars,
@@ -487,11 +498,12 @@ agent = Log(  # type: ignore[var-annotated]
             # ExponentialScheduler(4e-5, factor=1),
             hessian_type="none",
             record_td_errors=True,
-            exploration=#None,
-             EpsilonGreedyExploration(
-                epsilon=ExponentialScheduler(0.5, factor=0.9),
+            exploration=EpsilonGreedyExploration(  # None,
+                epsilon=ExponentialScheduler(
+                    0.5, factor=0.9
+                ),  # This decays 50x faster for ADMM agents
                 strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
-             ),
+            ),
             experience=None,
             # ExperienceReplay(
             #    maxlen=200, sample_size=0.5, include_latest=0.1, seed=0
@@ -504,12 +516,131 @@ agent = Log(  # type: ignore[var-annotated]
 
 agent.train(env=env, episodes=1, seed=69)
 
-if True:
+STORE_DATA = True
+PLOT = True
+
+# extract data
+
+X = env.observations[0].squeeze()
+U = env.actions[0].squeeze()
+R = env.rewards[0]
+TD = (
+    agent.td_errors if CENTRALISED else agent.agents[0].td_errors
+)  # all smaller agents have global TD error
+time = np.arange(R.size)
+
+# parameters
+n = 3  # TODO remove hard coded n
+updates = (
+    np.arange(len(agent.updates_history["b"]))
+    if CENTRALISED
+    else np.arange(len(agent.agents[0].updates_history["b"]))
+)
+b = (
+    [np.asarray(agent.updates_history["b"])]
+    if CENTRALISED
+    else [
+        np.asarray(agent.agents[i].updates_history["b"])
+        for i in range(len(agent.agents))
+    ]
+)
+f = (
+    [np.asarray(agent.updates_history["f"])]
+    if CENTRALISED
+    else [
+        np.asarray(agent.agents[i].updates_history["f"])
+        for i in range(len(agent.agents))
+    ]
+)
+V0 = (
+    [np.asarray(agent.updates_history["V0"])]
+    if CENTRALISED
+    else [
+        np.asarray(agent.agents[i].updates_history["V0"])
+        for i in range(len(agent.agents))
+    ]
+)
+bounds = (
+    [
+        np.concatenate(
+            [
+                np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
+                for n in ("x_lb", "x_ub")
+            ],
+            -1,
+        )
+    ]
+    if CENTRALISED
+    else [
+        np.concatenate(
+            [np.squeeze(agent.agents[i].updates_history[n]) for n in ("x_lb", "x_ub")],
+            -1,
+        )
+        for i in range(len(agent.agents))
+    ]
+)
+A = (
+    [
+        np.asarray(agent.updates_history[f"A_{i}"]).reshape(updates.size, -1)
+        for i in range(n)
+    ]  # TODO remove hard coded 3 agents
+    if CENTRALISED
+    else [
+        np.asarray(agent.agents[i].updates_history["A"]).reshape(updates.size, -1)
+        for i in range(len(agent.agents))
+    ]
+)
+B = (
+    [
+        np.asarray(agent.updates_history[f"B_{i}"]).reshape(updates.size, -1)
+        for i in range(n)
+    ]  # TODO remove hard coded 3 agents
+    if CENTRALISED
+    else [
+        np.asarray(agent.agents[i].updates_history["B"]).reshape(updates.size, -1)
+        for i in range(len(agent.agents))
+    ]
+)
+A_cs: list = []
+for i in range(n):
+    count = 0
+    for j in range(n):
+        if Adj[i, j] == 1:
+            if CENTRALISED:
+                A_cs.append(
+                    np.asarray(agent.updates_history[f"A_c_{i}_{j}"]).reshape(
+                        updates.size, -1
+                    )
+                )
+            else:
+                A_cs.append(
+                    np.asarray(agent.agents[i].updates_history[f"A_c_{count}"]).reshape(
+                        updates.size, -1
+                    )
+                )
+                count += 1
+
+# store data
+
+if STORE_DATA:
+    with open(
+        "data/C_" + str(CENTRALISED) + datetime.datetime.now().strftime("%d%H%M%S%f"),
+        "wb",
+    ) as file:
+        pickle.dump(X, file)
+        pickle.dump(U, file)
+        pickle.dump(R, file)
+        pickle.dump(TD, file)
+        pickle.dump(b, file)
+        pickle.dump(f, file)
+        pickle.dump(V0, file)
+        pickle.dump(bounds, file)
+        pickle.dump(A, file)
+        pickle.dump(B, file)
+        pickle.dump(A_cs, file)
+
+if PLOT:
     # plot the results
-    X = env.observations[0].squeeze()
-    U = env.actions[0].squeeze()
-    R = env.rewards[0]
-    time = np.arange(R.size)
     _, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)
     axs[0].plot(time, X[:-1, np.arange(0, env.nx, env.nx_l)])
     axs[1].plot(time, X[:-1, np.arange(1, env.nx, env.nx_l)])
@@ -523,38 +654,33 @@ if True:
     axs[2].set_ylabel("$a$")
 
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-    #axs[0].plot(agent.td_errors, "o", markersize=1)
-    axs[0].plot(agent.agents[0].td_errors, "o", markersize=1)
+    axs[0].plot(TD, "o", markersize=1)
     axs[1].semilogy(R, "o", markersize=1)
     axs[0].set_ylabel(r"$\tau$")
     axs[1].set_ylabel("$L$")
 
-if False:
+    # Plot parameters
     _, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
-    updates = np.arange(len(agent.agents[0].updates_history["b"]))
-    axs[0, 0].plot(updates, np.asarray(agent.agents[0].updates_history["b"]))
-    axs[0, 1].plot(
-        updates,
-        np.concatenate(
-            [
-                np.squeeze(agent.agents[0].updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
-                for n in ("x_lb", "x_ub")
-            ],
-            -1,
-        ),
-    )
-    axs[1, 0].plot(updates, np.asarray(agent.agents[0].updates_history["f"]))
-    axs[1, 1].plot(updates, np.squeeze(agent.agents[0].updates_history["V0"]))
-    axs[2, 0].plot(
-        updates, np.asarray(agent.agents[0].updates_history["A_0"]).reshape(updates.size, -1)
-    )
-    axs[2, 0].plot(
-        updates, np.asarray(agent.agents[0].updates_history["A_c_0_1"]).reshape(updates.size, -1)
-    )
-    axs[2, 1].plot(
-        updates,
-        np.asarray(agent.agents[0].updates_history["B_0"]).reshape(updates.size, -1),
-    )
+    for b_i in b:
+        axs[0, 0].plot(updates, b_i)
+    for bnd_i in bounds:
+        axs[0, 1].plot(
+            updates,
+            bnd_i
+        )
+    for f_i in f:
+        axs[1, 0].plot(updates, f_i)
+    for V0_i in V0:
+        axs[1, 1].plot(updates, V0_i.squeeze())
+    for A_i in A:
+        axs[2, 0].plot(
+            updates, A_i
+        )
+    for B_i in B:
+        axs[2, 1].plot(
+            updates, B_i
+        )
+    
     axs[0, 0].set_ylabel("$b$")
     axs[0, 1].set_ylabel("$x_1$")
     axs[1, 0].set_ylabel("$f$")

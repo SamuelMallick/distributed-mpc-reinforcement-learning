@@ -16,7 +16,6 @@ from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
-from joblib import Parallel, delayed
 from mpcrl.wrappers.agents import Log, RecordUpdates
 
 import matplotlib.pyplot as plt
@@ -39,6 +38,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
         fixed_dist_parameters_list: list,
         G: list[list[int]],
+        P: np.ndarray,
         rho: float,
         fixed_parameters: Union[
             None, Dict[str, npt.ArrayLike], Collection[Dict[str, npt.ArrayLike]]
@@ -61,6 +61,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self.centralised_debug = centralised_debug
         self.n = n
         self.G = G
+        self.P = P
         self.rho = rho
 
         super().__init__(  # use itself as a learning agent for error checking
@@ -87,22 +88,24 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
                     RecordUpdates(
                         LstdQLearningAgent(
-                        mpc_dist_list[i],
-                        deepcopy(update_strategy),
-                        discount_factor,
-                        deepcopy(learning_rate),
-                        learnable_dist_parameters_list[i],
-                        fixed_dist_parameters_list[i],
-                        StepWiseExploration(deepcopy(exploration), self.iters+1),  # TODO re-add exploration
-                        deepcopy(experience),
-                        max_percentage_update,
-                        warmstart,
-                        hessian_type,
-                        record_td_errors,
-                        cho_maxiter,
-                        cho_solve_kwargs,  # TODO add copy
-                        f"{name}_{i}",
-                    )
+                            mpc_dist_list[i],
+                            deepcopy(update_strategy),
+                            discount_factor,
+                            deepcopy(learning_rate),
+                            learnable_dist_parameters_list[i],
+                            fixed_dist_parameters_list[i],
+                            StepWiseExploration(
+                                deepcopy(exploration), self.iters + 1
+                            ),  # TODO re-add exploration
+                            deepcopy(experience),
+                            max_percentage_update,
+                            warmstart,
+                            hessian_type,
+                            record_td_errors,
+                            cho_maxiter,
+                            cho_solve_kwargs,  # TODO add copy
+                            f"{name}_{i}",
+                        )
                     )
                 )
 
@@ -246,6 +249,12 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 # calculate centralised cost from local TODO make this consensus
                 V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
                 Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
+                V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
+                Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
+                V_f_con = self.consensus(V_f_vec)
+                Q_f_con = self.consensus(Q_f_vec)
+                print(V_f - V_f_con[0])
+                print(Q_f - Q_f_con[0])
                 for i in range(len(self.agents)):  # store experience for agents
                     object.__setattr__(
                         solV_list[i], "f", V_f
@@ -348,10 +357,17 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 )
 
         plot_list = np.asarray(plot_list)
-        #plt.plot(plot_list[:, :, 2])
-        #plt.show()
+        # plt.plot(plot_list[:, :, 2])
+        # plt.show()
 
         return loc_action_list, local_sol_list  # return last solutions
+
+    def consensus(self, x):
+        """Runs the average consensus algorithm on the vector x"""
+        iters = 100 # number of consensus iters
+        for iter in range(iters):
+            x = self.P@x
+        return x
 
     def reset_admm_params(self):
         """Reset all vars for admm to zero."""
