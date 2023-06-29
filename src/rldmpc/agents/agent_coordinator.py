@@ -246,15 +246,13 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     new_state, episode, raises
                 )  # distributed
 
-                # calculate centralised cost from local TODO make this consensus
-                V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
-                Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
+                # calculate centralised cost from locals with consensus
+                #V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
+                #Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
                 V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
                 Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
-                V_f_con = self.consensus(V_f_vec)
-                Q_f_con = self.consensus(Q_f_vec)
-                print(V_f - V_f_con[0])
-                print(Q_f - Q_f_con[0])
+                V_f = self.consensus(V_f_vec)[0]*len(self.agents)
+                Q_f = self.consensus(Q_f_vec)[0]*len(self.agents)
                 for i in range(len(self.agents)):  # store experience for agents
                     object.__setattr__(
                         solV_list[i], "f", V_f
