@@ -11,12 +11,13 @@ import numpy as np
 import casadi as cs
 from mpcrl.agents.lstd_q_learning import ExpType
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import ExplorationStrategy
+from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
 from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
 from joblib import Parallel, delayed
+from mpcrl.wrappers.agents import Log, RecordUpdates
 
 import matplotlib.pyplot as plt
 
@@ -84,14 +85,15 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
-                    LstdQLearningAgent(
+                    RecordUpdates(
+                        LstdQLearningAgent(
                         mpc_dist_list[i],
                         deepcopy(update_strategy),
                         discount_factor,
                         deepcopy(learning_rate),
                         learnable_dist_parameters_list[i],
                         fixed_dist_parameters_list[i],
-                        None,  # TODO re-add exploration
+                        StepWiseExploration(deepcopy(exploration), self.iters+1),  # TODO re-add exploration
                         deepcopy(experience),
                         max_percentage_update,
                         warmstart,
@@ -100,6 +102,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         cho_maxiter,
                         cho_solve_kwargs,  # TODO add copy
                         f"{name}_{i}",
+                    )
                     )
                 )
 
@@ -249,7 +252,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     )  # overwrite the local costs with the global ones TODO make this nicer
                     object.__setattr__(solQ_list[i], "f", Q_f)
 
-                    if not self.agents[i]._try_store_experience(
+                    if not self.agents[i].unwrapped._try_store_experience(
                         cost, solQ_list[i], solV_list[i]
                     ):
                         self.agents[i].on_mpc_failure(
@@ -345,8 +348,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 )
 
         plot_list = np.asarray(plot_list)
-        # plt.plot(plot_list[:, :, 2])
-        # plt.show()
+        #plt.plot(plot_list[:, :, 2])
+        #plt.show()
 
         return loc_action_list, local_sol_list  # return last solutions
 

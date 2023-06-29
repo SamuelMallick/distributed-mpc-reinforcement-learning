@@ -276,7 +276,7 @@ class LinearMpc(Mpc[cs.SX]):
 class MPCAdmm(Mpc[cs.SX]):
     """MPC for agent inner prob in ADMM."""
 
-    rho = 1
+    rho = 0.5
 
     horizon = 10
     discount_factor = 0.9
@@ -430,7 +430,7 @@ class MPCAdmm(Mpc[cs.SX]):
                 # "linear_solver": "ma97",
                 # "linear_system_scaling": "mc19",
                 # "nlp_scaling_method": "equilibration-based",
-                "max_iter": 500,
+                "max_iter": 2000,
                 "sb": "yes",
                 "print_level": 0,
             },
@@ -467,7 +467,7 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e2)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(2e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -487,11 +487,11 @@ agent = Log(  # type: ignore[var-annotated]
             # ExponentialScheduler(4e-5, factor=1),
             hessian_type="none",
             record_td_errors=True,
-            exploration=None,  # TODO re-add exploration
-            # EpsilonGreedyExploration(
-            #    epsilon=ExponentialScheduler(0.5, factor=0.9),
-            #    strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
-            # ),
+            exploration=#None,
+             EpsilonGreedyExploration(
+                epsilon=ExponentialScheduler(0.5, factor=0.9),
+                strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+             ),
             experience=None,
             # ExperienceReplay(
             #    maxlen=200, sample_size=0.5, include_latest=0.1, seed=0
@@ -523,36 +523,37 @@ if True:
     axs[2].set_ylabel("$a$")
 
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-    axs[0].plot(agent.td_errors, "o", markersize=1)
+    #axs[0].plot(agent.td_errors, "o", markersize=1)
+    axs[0].plot(agent.agents[0].td_errors, "o", markersize=1)
     axs[1].semilogy(R, "o", markersize=1)
     axs[0].set_ylabel(r"$\tau$")
     axs[1].set_ylabel("$L$")
 
 if False:
     _, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
-    updates = np.arange(len(agent.updates_history["b"]))
-    axs[0, 0].plot(updates, np.asarray(agent.updates_history["b"]))
+    updates = np.arange(len(agent.agents[0].updates_history["b"]))
+    axs[0, 0].plot(updates, np.asarray(agent.agents[0].updates_history["b"]))
     axs[0, 1].plot(
         updates,
         np.concatenate(
             [
-                np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
+                np.squeeze(agent.agents[0].updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
                 for n in ("x_lb", "x_ub")
             ],
             -1,
         ),
     )
-    axs[1, 0].plot(updates, np.asarray(agent.updates_history["f"]))
-    axs[1, 1].plot(updates, np.squeeze(agent.updates_history["V0"]))
+    axs[1, 0].plot(updates, np.asarray(agent.agents[0].updates_history["f"]))
+    axs[1, 1].plot(updates, np.squeeze(agent.agents[0].updates_history["V0"]))
     axs[2, 0].plot(
-        updates, np.asarray(agent.updates_history["A_0"]).reshape(updates.size, -1)
+        updates, np.asarray(agent.agents[0].updates_history["A_0"]).reshape(updates.size, -1)
     )
     axs[2, 0].plot(
-        updates, np.asarray(agent.updates_history["A_c_0_1"]).reshape(updates.size, -1)
+        updates, np.asarray(agent.agents[0].updates_history["A_c_0_1"]).reshape(updates.size, -1)
     )
     axs[2, 1].plot(
         updates,
-        np.asarray(agent.updates_history["B_0"]).reshape(updates.size, -1),
+        np.asarray(agent.agents[0].updates_history["B_0"]).reshape(updates.size, -1),
     )
     axs[0, 0].set_ylabel("$b$")
     axs[0, 1].set_ylabel("$x_1$")
