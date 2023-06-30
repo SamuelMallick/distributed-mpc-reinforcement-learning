@@ -149,31 +149,35 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         return x_new, r, False, False, {}
 
 
+
+A_l_init = np.asarray([[1, 0.25], [0, 1]])
+B_l_init = np.asarray([[0.0312], [0.25]])
+A_c_l_init = np.array([[0, 0], [0, 0]])
+B_c_l_init = np.array([[0], [0]])
+learnable_pars_init_single = {
+    "V0": np.zeros((1, 1)),
+    "x_lb": np.reshape([0, 0], (-1, 1)),
+    "x_ub": np.reshape([1, 0], (-1, 1)),
+    "b": np.zeros(LtiSystem.nx_l),
+    "f": np.zeros(LtiSystem.nx_l + LtiSystem.nu_l),
+}
+
+
 class LinearMpc(Mpc[cs.SX]):
     """The centralised MPC controller."""
 
     horizon = 10
     discount_factor = 0.9
 
-    A_l_init = np.asarray([[1, 0.25], [0, 1]])
-    B_l_init = np.asarray([[0.0312], [0.25]])
-    A_c_l_init = np.array([[0, 0], [0, 0]])
-    B_c_l_init = np.array([[0], [0]])
     A_init, B_init = get_centralized_dynamics(
         LtiSystem.n, LtiSystem.nx_l, A_l_init, B_l_init, A_c_l_init
     )
 
-    learnable_pars_init = {
-        "V0": np.zeros((LtiSystem.n, 1)),
-        "x_lb": np.tile([0, 0], LtiSystem.n).reshape(-1, 1),
-        "x_ub": np.tile([1, 0], LtiSystem.n).reshape(-1, 1),
-        "b": np.zeros(LtiSystem.nx),
-        "f": np.zeros(LtiSystem.nx + LtiSystem.nu),
-    }
-
     # add the initial guesses of the learable parameters
-
+    learnable_pars_init = {}
     for i in range(LtiSystem.n):
+        for name, val in learnable_pars_init_single.items():
+            learnable_pars_init[f"{name}_{i}"] = val
         learnable_pars_init["A_" + str(i)] = A_l_init
         learnable_pars_init["B_" + str(i)] = B_l_init
         for j in range(LtiSystem.n):
@@ -190,20 +194,24 @@ class LinearMpc(Mpc[cs.SX]):
         nlp = Nlp[cs.SX]()
         super().__init__(nlp, N)
 
-        # parameters
-        V0 = self.parameter("V0", (LtiSystem.n,))
-        x_lb = self.parameter("x_lb", (nx,))
-        x_ub = self.parameter("x_ub", (nx,))
-        b = self.parameter("b", (nx, 1))
-        f = self.parameter("f", (nx + nu, 1))
 
         # learn parameters with topology knowledge
-
         A_list = []
         B_list = []
+        V0_list = []
+        x_lb_list = []
+        x_ub_list = []
+        b_list = []
+        f_list = []
         A_c_list: List[list] = []
         B_c_list: List[list] = []
         for i in range(LtiSystem.n):
+            V0_list.append(self.parameter(f"V0_{i}", (1,)))
+            x_lb_list.append(self.parameter(f"x_lb_{i}", (LtiSystem.nx_l,)))
+            x_ub_list.append(self.parameter(f"x_ub_{i}", (LtiSystem.nx_l,)))
+            b_list.append(self.parameter(f"b_{i}", (LtiSystem.nx_l,1)))
+            f_list.append(self.parameter(f"f_{i}", (LtiSystem.nx_l+LtiSystem.nu_l,1)))
+
             A_list.append(
                 self.parameter("A_" + str(i), (LtiSystem.nx_l, LtiSystem.nx_l))
             )
@@ -222,6 +230,14 @@ class LinearMpc(Mpc[cs.SX]):
                             "A_c_" + str(i) + "_" + str(j),
                             (LtiSystem.nx_l, LtiSystem.nx_l),
                         )
+        # add listed params to one for intiialisation
+
+        V0 = cs.vcat(V0_list)
+        x_lb = cs.vcat(x_lb_list)
+        x_ub = cs.vcat(x_ub_list)
+        b = cs.vcat(b_list)
+        f = cs.vcat(f_list)
+
 
         A, B = get_learnable_centralized_dynamics(
             LtiSystem.n,
@@ -532,12 +548,12 @@ time = np.arange(R.size)
 # parameters
 n = 3  # TODO remove hard coded n
 updates = (
-    np.arange(len(agent.updates_history["b"]))
+    np.arange(len(agent.updates_history["b_0"]))
     if CENTRALISED
     else np.arange(len(agent.agents[0].updates_history["b"]))
 )
 b = (
-    [np.asarray(agent.updates_history["b"])]
+    [np.asarray(agent.updates_history[f"b_{i}"]) for i in range(LtiSystem.n)]
     if CENTRALISED
     else [
         np.asarray(agent.agents[i].updates_history["b"])
@@ -545,7 +561,7 @@ b = (
     ]
 )
 f = (
-    [np.asarray(agent.updates_history["f"])]
+    [np.asarray(agent.updates_history[f"f_{i}"]) for i in range(LtiSystem.n)]
     if CENTRALISED
     else [
         np.asarray(agent.agents[i].updates_history["f"])
@@ -553,7 +569,7 @@ f = (
     ]
 )
 V0 = (
-    [np.asarray(agent.updates_history["V0"])]
+    [np.asarray(agent.updates_history[f"V0_{i}"]) for i in range(LtiSystem.n)]
     if CENTRALISED
     else [
         np.asarray(agent.agents[i].updates_history["V0"])
@@ -564,11 +580,11 @@ bounds = (
     [
         np.concatenate(
             [
-                np.squeeze(agent.updates_history[n])[:, np.arange(0, env.nx, env.nx_l)]
-                for n in ("x_lb", "x_ub")
+                np.squeeze(agent.updates_history[n])
+                for n in (f"x_lb_{i}", f"x_ub_{i}")
             ],
             -1,
-        )
+        ) for i in range(LtiSystem.n)
     ]
     if CENTRALISED
     else [
