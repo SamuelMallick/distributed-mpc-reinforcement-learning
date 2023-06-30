@@ -536,10 +536,14 @@ STORE_DATA = True
 PLOT = True
 
 # extract data
-
-X = env.observations[0].squeeze()
-U = env.actions[0].squeeze()
-R = env.rewards[0]
+if len(env.observations) > 0:
+    X = env.observations[0].squeeze()
+    U = env.actions[0].squeeze()
+    R = env.rewards[0]
+else:
+    X = np.squeeze(env.ep_observations)
+    U = np.squeeze(env.ep_actions)
+    R = np.squeeze(env.ep_rewards)
 TD = (
     agent.td_errors if CENTRALISED else agent.agents[0].td_errors
 )  # all smaller agents have global TD error
