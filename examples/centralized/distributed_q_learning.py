@@ -26,7 +26,7 @@ from rldmpc.core.admm import g_map
 import pickle
 import datetime
 
-CENTRALISED = False
+CENTRALISED = True
 
 Adj = np.array(
     [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
@@ -35,7 +35,7 @@ Adj = np.array(
 eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
 D_in = np.array([[1, 0, 0], [0, 2, 0], [0, 0, 1]])  # Hard coded D_in matrix from Adj
 L = D_in - Adj  # graph laplacian
-P = np.eye(3) - eps*L   # consensus matrix
+P = np.eye(3) - eps * L  # consensus matrix
 G = g_map(Adj)  # mapping from global var to local var indexes for ADMM
 
 
@@ -149,7 +149,6 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         return x_new, r, False, False, {}
 
 
-
 A_l_init = np.asarray([[1, 0.25], [0, 1]])
 B_l_init = np.asarray([[0.0312], [0.25]])
 A_c_l_init = np.array([[0, 0], [0, 0]])
@@ -194,7 +193,6 @@ class LinearMpc(Mpc[cs.SX]):
         nlp = Nlp[cs.SX]()
         super().__init__(nlp, N)
 
-
         # learn parameters with topology knowledge
         A_list = []
         B_list = []
@@ -209,8 +207,10 @@ class LinearMpc(Mpc[cs.SX]):
             V0_list.append(self.parameter(f"V0_{i}", (1,)))
             x_lb_list.append(self.parameter(f"x_lb_{i}", (LtiSystem.nx_l,)))
             x_ub_list.append(self.parameter(f"x_ub_{i}", (LtiSystem.nx_l,)))
-            b_list.append(self.parameter(f"b_{i}", (LtiSystem.nx_l,1)))
-            f_list.append(self.parameter(f"f_{i}", (LtiSystem.nx_l+LtiSystem.nu_l,1)))
+            b_list.append(self.parameter(f"b_{i}", (LtiSystem.nx_l, 1)))
+            f_list.append(
+                self.parameter(f"f_{i}", (LtiSystem.nx_l + LtiSystem.nu_l, 1))
+            )
 
             A_list.append(
                 self.parameter("A_" + str(i), (LtiSystem.nx_l, LtiSystem.nx_l))
@@ -237,7 +237,6 @@ class LinearMpc(Mpc[cs.SX]):
         x_ub = cs.vcat(x_ub_list)
         b = cs.vcat(b_list)
         f = cs.vcat(f_list)
-
 
         A, B = get_learnable_centralized_dynamics(
             LtiSystem.n,
@@ -493,14 +492,14 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(2e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
             rho=MPCAdmm.rho,
             n=LtiSystem.n,
             G=G,
-            P = P,
+            P=P,
             centralised_flag=CENTRALISED,
             centralised_debug=False,
             mpc_cent=mpc,
@@ -509,28 +508,27 @@ agent = Log(  # type: ignore[var-annotated]
             learnable_dist_parameters_list=learnable_dist_parameters_list,
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
-            update_strategy=1,
+            update_strategy=2,
             learning_rate=4e-5,
             # ExponentialScheduler(4e-5, factor=1),
             hessian_type="none",
             record_td_errors=True,
-            exploration=EpsilonGreedyExploration(  # None,
+            exploration=#None,
+            EpsilonGreedyExploration(  # None,  # None,
                 epsilon=ExponentialScheduler(
-                    0.5, factor=0.9
+                    0.5, factor=0.99
                 ),  # This decays 50x faster for ADMM agents
-                strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+                strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+                seed=1,
             ),
-            experience=None,
-            # ExperienceReplay(
-            #    maxlen=200, sample_size=0.5, include_latest=0.1, seed=0
-            # ),
+            experience=ExperienceReplay(maxlen=100, sample_size=15, include_latest=10, seed=1),  # None,
         )
     ),
     level=logging.DEBUG,
     log_frequencies={"on_timestep_end": 200},
 )
 
-agent.train(env=env, episodes=1, seed=69)
+agent.train(env=env, episodes=1, seed=1)
 
 STORE_DATA = True
 PLOT = True
@@ -583,12 +581,10 @@ V0 = (
 bounds = (
     [
         np.concatenate(
-            [
-                np.squeeze(agent.updates_history[n])
-                for n in (f"x_lb_{i}", f"x_ub_{i}")
-            ],
+            [np.squeeze(agent.updates_history[n]) for n in (f"x_lb_{i}", f"x_ub_{i}")],
             -1,
-        ) for i in range(LtiSystem.n)
+        )
+        for i in range(LtiSystem.n)
     ]
     if CENTRALISED
     else [
@@ -684,23 +680,16 @@ if PLOT:
     for b_i in b:
         axs[0, 0].plot(updates, b_i)
     for bnd_i in bounds:
-        axs[0, 1].plot(
-            updates,
-            bnd_i
-        )
+        axs[0, 1].plot(updates, bnd_i)
     for f_i in f:
         axs[1, 0].plot(updates, f_i)
     for V0_i in V0:
         axs[1, 1].plot(updates, V0_i.squeeze())
     for A_i in A:
-        axs[2, 0].plot(
-            updates, A_i
-        )
+        axs[2, 0].plot(updates, A_i)
     for B_i in B:
-        axs[2, 1].plot(
-            updates, B_i
-        )
-    
+        axs[2, 1].plot(updates, B_i)
+
     axs[0, 0].set_ylabel("$b$")
     axs[0, 1].set_ylabel("$x_1$")
     axs[1, 0].set_ylabel("$f$")

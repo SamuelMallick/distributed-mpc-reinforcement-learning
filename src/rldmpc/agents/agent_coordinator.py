@@ -17,6 +17,8 @@ from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import Log, RecordUpdates
+from mpcrl.core.exploration import EpsilonGreedyExploration
+from mpcrl.core.schedulers import ExponentialScheduler
 
 import matplotlib.pyplot as plt
 
@@ -94,9 +96,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                             deepcopy(learning_rate),
                             learnable_dist_parameters_list[i],
                             fixed_dist_parameters_list[i],
-                            StepWiseExploration(
-                                deepcopy(exploration), self.iters + 1
-                            ),  # TODO re-add exploration
+                            deepcopy(exploration),
                             deepcopy(experience),
                             max_percentage_update,
                             warmstart,
@@ -181,20 +181,21 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if not solV.success:
                 self.on_mpc_failure(episode, None, solV.status, raises)
 
-            joint_action, solV_list = self.distributed_state_value(
+            joint_action, solV_list, error_flag = self.distributed_state_value(
                 state, episode, raises
             )
-            for i in range(len(self.agents)):
-                if not solV_list[i].success:
-                    self.agents[i].on_mpc_failure(episode, None, solV[i].status, raises)
+
             iter_count = 0
             while not (truncated or terminated):
                 iter_count += 1
                 print(iter_count)
                 # compute Q(s,a)
-                solQ_list = self.distributed_action_value(
+                solQ_list, error_flag = self.distributed_action_value(
                     state, joint_action, episode, raises
                 )
+                if error_flag:
+                    # self.on_training_end(env, rewards)
+                    return rewards
 
                 # compare dual vars of centralised and distributed sols
                 # dynamics
@@ -242,17 +243,19 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                             episode, timestep, f"{solQ.status}/{solV.status}", raises
                         )
 
-                new_joint_action, solV_list = self.distributed_state_value(
+                new_joint_action, solV_list, error_flag = self.distributed_state_value(
                     new_state, episode, raises
                 )  # distributed
+                if error_flag:
+                    return rewards
 
                 # calculate centralised cost from locals with consensus
-                #V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
-                #Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
-                V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
-                Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
-                V_f = self.consensus(V_f_vec)[0]*len(self.agents)
-                Q_f = self.consensus(Q_f_vec)[0]*len(self.agents)
+                V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
+                Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
+                #V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
+                #Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
+                #V_f = self.consensus(V_f_vec)[0] * len(self.agents)
+                #Q_f = self.consensus(Q_f_vec)[0] * len(self.agents)
                 for i in range(len(self.agents)):  # store experience for agents
                     object.__setattr__(
                         solV_list[i], "f", V_f
@@ -280,14 +283,19 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             return rewards
 
     def distributed_state_value(self, state, episode, raises):
-        local_action_list, local_sol_list = self.admm(state, episode, raises)
-        return cs.DM(local_action_list), local_sol_list
+        local_action_list, local_sol_list, error_flag = self.admm(
+            state, episode, raises
+        )
+        if not error_flag:
+            return cs.DM(local_action_list), local_sol_list, error_flag
+        else:
+            return None, local_sol_list, error_flag
 
     def distributed_action_value(self, state, action, episode, raises):
-        local_action_list, local_sol_list = self.admm(
+        local_action_list, local_sol_list, error_flag = self.admm(
             state, episode, raises, action=action
         )
-        return local_sol_list
+        return local_sol_list, error_flag
 
     def admm(self, state, episode, raises, action=None):
         """Uses ADMM to solve distributed problem. If actions passed, solves state-action val."""
@@ -318,9 +326,14 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         loc_state, loc_action
                     )
                 if not local_sol_list[i].success:
-                    self.agents[i].on_mpc_failure(
-                        episode, None, local_sol_list[i].status, raises
-                    )
+                    # self.agents[i].on_mpc_failure(
+                    #    episode, None, local_sol_list[i].status, raises
+                    # )
+                    return (
+                        loc_action_list,
+                        local_sol_list,
+                        True,
+                    )  # return with error flag as true
 
                 idx = self.G[i].index(i) * self.nx_l
                 self.x_temp_list[i] = cs.vertcat(  # insert local state into place
@@ -358,13 +371,17 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         # plt.plot(plot_list[:, :, 2])
         # plt.show()
 
-        return loc_action_list, local_sol_list  # return last solutions
+        return (
+            loc_action_list,
+            local_sol_list,
+            False,
+        )  # return last solutions with error flag as false
 
     def consensus(self, x):
         """Runs the average consensus algorithm on the vector x"""
-        iters = 100 # number of consensus iters
+        iters = 100  # number of consensus iters
         for iter in range(iters):
-            x = self.P@x
+            x = self.P @ x
         return x
 
     def reset_admm_params(self):
