@@ -51,21 +51,26 @@ def admm(
     iters = 100  # number of iterations for the algorithm
     rho = 0.8  # penalty co-efficient
 
+    alpha = alpha_prev =  1   # for fast ADMM
+
     n = len(G)  # number of agents
     nx_l = x_list[0].shape[0]  # dimension of local vars
 
     # create auxillary vars: y - lagrange multipliers for consensus constraints, z - global vars, and temporary x vars - x_temp
 
     y_list: list[np.ndarray] = []
+    y_prev_list: list[np.ndarray] = []  # for fast ADMM
     x_temp_list: list[np.ndarray] = []  # stores the intermediate numerical values for x
     dual_temp_list: list[np.ndarray] = []  # dual vals of from inner probs
     for i in range(n):
         y_list.append(np.zeros(x_list[i].shape))
+        y_prev_list.append(np.zeros(x_list[i].shape))
         x_temp_list.append(np.zeros(x_list[i].shape))
         dual_temp_list.append(
             np.zeros((constraint_list[i][0].shape[0], len(constraint_list[i])))
         )
     z = np.zeros((nx_l, n))
+    z_prev = z.copy()   # for fast ADMM
 
     for iter in range(iters):
         # x-update - TODO parallelise
@@ -93,11 +98,35 @@ def admm(
                     sum += x_temp_list[j][:, [G[j].index(i)]]
             z[:, [i]] = sum / count  # average the opinions
 
+        if iter == 0:
+            z_prev = z.copy()
+
         # y-update - TODO parallelise
 
         for i in range(n):
             z_temp = z[:, [j for j in G[i]]]  # global vars relevant for agent i
             y_list[i] = y_list[i] + rho * (x_temp_list[i] - z_temp)
+            if iter == 0:
+                y_prev_list[i] = y_list[i].copy()
+        
+        # alpha update
+
+        alpha = (1+np.sqrt(1+4*alpha_prev**2))/2
+
+        # second z update
+
+        z = z + ((alpha_prev-1)/alpha)*(z - z_prev)
+
+        # second y update
+
+        for i in range(n):
+            y_list[i] = y_list[i] + ((alpha_prev-1)/alpha)*(y_list[i] - y_prev_list[i])
+
+        # increment history tracking vars
+
+        alpha_prev = alpha
+        z_prev = z.copy()
+        for i in range(n): y_prev_list[i] = y_list[i].copy()
 
     return [x_list[i].value for i in range(n)], dual_temp_list
 

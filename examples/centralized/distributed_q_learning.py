@@ -492,7 +492,7 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(5e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(10e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -509,8 +509,8 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=2,
-            learning_rate=4e-5,
-            # ExponentialScheduler(4e-5, factor=1),
+            learning_rate=#4e-5,
+            ExponentialScheduler(4e-5, factor=0.9995),
             hessian_type="none",
             record_td_errors=True,
             exploration=#None,
@@ -518,7 +518,7 @@ agent = Log(  # type: ignore[var-annotated]
                 epsilon=ExponentialScheduler(
                     0.5, factor=0.99
                 ),  # This decays 50x faster for ADMM agents
-                strength=0.2 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+                strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),
             experience=ExperienceReplay(maxlen=100, sample_size=15, include_latest=10, seed=1),  # None,
@@ -640,7 +640,7 @@ for i in range(n):
 
 if STORE_DATA:
     with open(
-        "data/C_" + str(CENTRALISED) + datetime.datetime.now().strftime("%d%H%M%S%f"),
+        "data/C_" + str(CENTRALISED) + datetime.datetime.now().strftime("%d%H%M%S%f") + str(".pkl"),
         "wb",
     ) as file:
         pickle.dump(X, file)
