@@ -230,7 +230,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         # exit('Duals of dynamics werent accurate!')
                         print("Duals of dynamics werent accurate!")
                 # step the system with action computed at the previous iteration
-                new_state, cost, truncated, terminated, _ = env.step(joint_action)
+                new_state, cost, truncated, terminated, info_dict = env.step(joint_action)
+                dist_costs = info_dict["r_dist"] # get distributed costs from env dict
                 self.on_env_step(env, episode, timestep)  # step centralised
                 for agent in self.agents:  # step distributed agents
                     agent.on_env_step(env, episode, timestep)
@@ -249,13 +250,14 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 if error_flag:
                     return rewards
 
-                # calculate centralised cost from locals with consensus
-                V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
-                Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
-                #V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
-                #Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
-                #V_f = self.consensus(V_f_vec)[0] * len(self.agents)
-                #Q_f = self.consensus(Q_f_vec)[0] * len(self.agents)
+                # calculate centralised costs from locals with consensus
+                # V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
+                # Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
+                V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
+                Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
+                V_f = self.consensus(V_f_vec)[0] * len(self.agents)
+                Q_f = self.consensus(Q_f_vec)[0] * len(self.agents)
+                cost_f = self.consensus(np.asarray(dist_costs))[0] * len(self.agents)
                 for i in range(len(self.agents)):  # store experience for agents
                     object.__setattr__(
                         solV_list[i], "f", V_f
@@ -263,7 +265,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     object.__setattr__(solQ_list[i], "f", Q_f)
 
                     if not self.agents[i].unwrapped._try_store_experience(
-                        cost, solQ_list[i], solV_list[i]
+                        cost_f, solQ_list[i], solV_list[i]
                     ):
                         self.agents[i].on_mpc_failure(
                             episode,
@@ -379,7 +381,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
     def consensus(self, x):
         """Runs the average consensus algorithm on the vector x"""
-        iters = 100  # number of consensus iters
+        iters = 200  # number of consensus iters
         for iter in range(iters):
             x = self.P @ x
         return x

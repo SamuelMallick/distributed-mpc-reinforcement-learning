@@ -10,7 +10,7 @@ update_rate = 2
 
 limit = 8500
 
-with open('data/decentralised_diverging_example.pkl', 'rb') as file:
+with open("data/decentralised_diverging_example.pkl", "rb") as file:
     X = pickle.load(file)
     U = pickle.load(file)
     R = pickle.load(file)
@@ -45,17 +45,17 @@ axs[1].set_ylabel("$L$")
 # Plot parameters
 _, axs = plt.subplots(3, 2, constrained_layout=True, sharex=True)
 for b_i in b:
-    axs[0, 0].plot(b_i[:(int(limit/update_rate))])
+    axs[0, 0].plot(b_i[: (int(limit / update_rate))])
 for bnd_i in bounds:
-    axs[0, 1].plot(bnd_i[:(int(limit/update_rate))])
+    axs[0, 1].plot(bnd_i[: (int(limit / update_rate))])
 for f_i in f:
-    axs[1, 0].plot(f_i[:(int(limit/update_rate))])
+    axs[1, 0].plot(f_i[: (int(limit / update_rate))])
 for V0_i in V0:
-    axs[1, 1].plot(V0_i.squeeze()[:(int(limit/update_rate))])
+    axs[1, 1].plot(V0_i.squeeze()[: (int(limit / update_rate))])
 for A_i in A:
-    axs[2, 0].plot(A_i[:(int(limit/update_rate))])
+    axs[2, 0].plot(A_i[: (int(limit / update_rate))])
 for B_i in B:
-    axs[2, 1].plot(B_i[:(int(limit/update_rate))])
+    axs[2, 1].plot(B_i[: (int(limit / update_rate))])
 
 axs[0, 0].set_ylabel("$b$")
 axs[0, 1].set_ylabel("$x_1$")

@@ -51,7 +51,7 @@ def admm(
     iters = 100  # number of iterations for the algorithm
     rho = 0.8  # penalty co-efficient
 
-    alpha = alpha_prev =  1   # for fast ADMM
+    alpha = alpha_prev = 1  # for fast ADMM
 
     n = len(G)  # number of agents
     nx_l = x_list[0].shape[0]  # dimension of local vars
@@ -70,7 +70,7 @@ def admm(
             np.zeros((constraint_list[i][0].shape[0], len(constraint_list[i])))
         )
     z = np.zeros((nx_l, n))
-    z_prev = z.copy()   # for fast ADMM
+    z_prev = z.copy()  # for fast ADMM
 
     for iter in range(iters):
         # x-update - TODO parallelise
@@ -108,25 +108,28 @@ def admm(
             y_list[i] = y_list[i] + rho * (x_temp_list[i] - z_temp)
             if iter == 0:
                 y_prev_list[i] = y_list[i].copy()
-        
+
         # alpha update
 
-        alpha = (1+np.sqrt(1+4*alpha_prev**2))/2
+        alpha = (1 + np.sqrt(1 + 4 * alpha_prev**2)) / 2
 
         # second z update
 
-        z = z + ((alpha_prev-1)/alpha)*(z - z_prev)
+        z = z + ((alpha_prev - 1) / alpha) * (z - z_prev)
 
         # second y update
 
         for i in range(n):
-            y_list[i] = y_list[i] + ((alpha_prev-1)/alpha)*(y_list[i] - y_prev_list[i])
+            y_list[i] = y_list[i] + ((alpha_prev - 1) / alpha) * (
+                y_list[i] - y_prev_list[i]
+            )
 
         # increment history tracking vars
 
         alpha_prev = alpha
         z_prev = z.copy()
-        for i in range(n): y_prev_list[i] = y_list[i].copy()
+        for i in range(n):
+            y_prev_list[i] = y_list[i].copy()
 
     return [x_list[i].value for i in range(n)], dual_temp_list
 

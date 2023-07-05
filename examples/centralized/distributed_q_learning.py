@@ -124,7 +124,9 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         )  # + np.random.rand(6, 1)
         return self.x, {}
 
-    def get_stage_cost(self, state: npt.NDArray[np.floating], action: float) -> float:
+    def get_stage_cost(
+        self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
+    ) -> float:
         """Computes the stage cost `L(s,a)`."""
         lb, ub = self.x_bnd
         return 0.5 * float(
@@ -133,6 +135,33 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             + self.w @ np.maximum(0, lb[:, np.newaxis] - state)
             + self.w @ np.maximum(0, state - ub[:, np.newaxis])
         )
+
+    def get_dist_stage_cost(
+        self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
+    ) -> list[float]:
+        """Computes the stage cost for each agent `L(s_i,a_i)`."""
+        lb, ub = self.x_bnd
+        stage_costs = [
+            0.5
+            * float(
+                np.square(state[self.nx_l * i : self.nx_l * (i + 1), :]).sum()
+                + 0.5 * np.square(action[self.nu_l * i : self.nu_l * (i + 1), :]).sum()
+                + self.w[:, self.nx_l * i : self.nx_l * (i + 1)]
+                @ np.maximum(
+                    0,
+                    lb[self.nx_l * i : self.nx_l * (i + 1), np.newaxis]
+                    - state[self.nx_l * i : self.nx_l * (i + 1), :],
+                )
+                + self.w[:, self.nx_l * i : self.nx_l * (i + 1)]
+                @ np.maximum(
+                    0,
+                    state[self.nx_l * i : self.nx_l * (i + 1), :]
+                    - ub[self.nx_l * i : self.nx_l * (i + 1), np.newaxis],
+                )
+            )
+            for i in range(self.n)
+        ]
+        return stage_costs
 
     def step(
         self, action: cs.DM
@@ -146,7 +175,8 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
         self.x = x_new
         r = self.get_stage_cost(self.x, action)
-        return x_new, r, False, False, {}
+        r_dist = self.get_dist_stage_cost(self.x, action)
+        return x_new, r, False, False, {"r_dist": r_dist}
 
 
 A_l_init = np.asarray([[1, 0.25], [0, 1]])
@@ -509,19 +539,19 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=2,
-            learning_rate=#4e-5,
-            ExponentialScheduler(4e-5, factor=0.9995),
+            learning_rate=ExponentialScheduler(4e-5, factor=0.9995),  # 4e-5,
             hessian_type="none",
             record_td_errors=True,
-            exploration=#None,
-            EpsilonGreedyExploration(  # None,  # None,
+            exploration=EpsilonGreedyExploration(  # None,  # None,  # None,
                 epsilon=ExponentialScheduler(
-                    0.5, factor=0.99
+                    0.5, factor=0.995
                 ),  # This decays 50x faster for ADMM agents
                 strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),
-            experience=ExperienceReplay(maxlen=100, sample_size=15, include_latest=10, seed=1),  # None,
+            experience=ExperienceReplay(
+                maxlen=100, sample_size=15, include_latest=10, seed=1
+            ),  # None,
         )
     ),
     level=logging.DEBUG,
@@ -640,7 +670,10 @@ for i in range(n):
 
 if STORE_DATA:
     with open(
-        "data/C_" + str(CENTRALISED) + datetime.datetime.now().strftime("%d%H%M%S%f") + str(".pkl"),
+        "data/C_"
+        + str(CENTRALISED)
+        + datetime.datetime.now().strftime("%d%H%M%S%f")
+        + str(".pkl"),
         "wb",
     ) as file:
         pickle.dump(X, file)
@@ -696,5 +729,4 @@ if PLOT:
     axs[1, 1].set_ylabel("$V_0$")
     axs[2, 0].set_ylabel("$A$")
     axs[2, 1].set_ylabel("$B$")
-
 plt.show()
