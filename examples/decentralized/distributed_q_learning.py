@@ -26,7 +26,7 @@ from rldmpc.core.admm import g_map
 import pickle
 import datetime
 
-CENTRALISED = True
+CENTRALISED = False
 
 Adj = np.array(
     [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
@@ -539,12 +539,12 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=2,
-            learning_rate=ExponentialScheduler(4e-5, factor=0.9995),  # 4e-5,
+            learning_rate=ExponentialScheduler(4e-5, factor=0.9996),  # 4e-5,
             hessian_type="none",
             record_td_errors=True,
             exploration=EpsilonGreedyExploration(  # None,  # None,  # None,
                 epsilon=ExponentialScheduler(
-                    0.5, factor=0.995
+                    0.5, factor=0.99
                 ),  # This decays 50x faster for ADMM agents
                 strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,

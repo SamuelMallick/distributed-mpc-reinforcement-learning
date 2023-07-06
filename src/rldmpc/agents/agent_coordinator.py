@@ -230,8 +230,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         # exit('Duals of dynamics werent accurate!')
                         print("Duals of dynamics werent accurate!")
                 # step the system with action computed at the previous iteration
-                new_state, cost, truncated, terminated, info_dict = env.step(joint_action)
-                dist_costs = info_dict["r_dist"] # get distributed costs from env dict
+                new_state, cost, truncated, terminated, info_dict = env.step(
+                    joint_action
+                )
+                dist_costs = info_dict["r_dist"]  # get distributed costs from env dict
                 self.on_env_step(env, episode, timestep)  # step centralised
                 for agent in self.agents:  # step distributed agents
                     agent.on_env_step(env, episode, timestep)
@@ -345,7 +347,6 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 )
             # plot_list.append(loc_solV[0].vals["x"])
             # z update -> essentially an averaging of all agents' optinions on each z
-            # TODO -> make distributed with consensus
             for i in range(len(self.agents)):  # loop through each agents associated z
                 count = 0
                 sum = np.zeros((self.nx_l, self.z.shape[1]))
