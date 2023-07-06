@@ -53,7 +53,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     R = block_diag(*([R_l] * n))
 
     load = np.array([[0], [load_val], [0], [0]])  # load ref points
-
+    step_counter = 0
     def reset(
         self,
         *,
@@ -62,7 +62,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the system."""
         super().reset(seed=seed, options=options)
-        self.x = np.ones((n * nx_l, 1))
+        self.x = np.zeros((n * nx_l, 1))
         return self.x, {}
 
     def get_stage_cost(
@@ -78,6 +78,12 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         action = action.full()
         x_new = self.A @ self.x + self.B @ action + self.A_load @ self.load
 
+        if self.step_counter == 5:
+            d = np.zeros((n*nx_l, 1))
+            d[1*nx_l, :] = 0.025
+            x_new += d
+        self.step_counter += 1
+
         self.x = x_new
         r = self.get_stage_cost(self.x, action)
         return x_new, r, False, False, {}
@@ -86,8 +92,8 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 class LinearMpc(Mpc[cs.SX]):
     """The centralised MPC controller."""
 
-    horizon = 10
-    discount_factor = 0.9
+    horizon = 20
+    discount_factor = 1
 
     # initialise learnable parameters vals
 
@@ -185,7 +191,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
     )
 )
 
-env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(5e1)))
+env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(8e1)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgent(

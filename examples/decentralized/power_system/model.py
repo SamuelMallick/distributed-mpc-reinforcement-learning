@@ -32,8 +32,11 @@ nu_l = 1
 D_list = [3.0, 0.275, 2.0, 2.75]
 R_f_list = [0.03, 0.07, 0.04, 0.03]
 M_a_list = [4, 40, 35, 10]
-T_CH_list = [5, 10, 20, 10]
-T_G_list = [4, 25, 15, 5]
+#M_a_list = [20, 100, 50, 60]
+#T_CH_list = [5, 10, 20, 10]
+T_CH_list = [50, 100, 200, 100]
+#T_G_list = [4, 25, 15, 5]
+T_G_list = [40, 250, 150, 50]
 T_tie_list = [0, 2.54, 1.5, 2.5]
 ts = 1  # time-step
 
@@ -44,7 +47,7 @@ def dynamics_from_parameters(D, R_f, M_a, T_CH, T_G, T_tie, ts):
     A_l = [
         np.array(
             [
-                [-D[i] / M_a[i], 1 / M_a[i], 0, -1 / M_a[i]],
+                [-D[i] / M_a[i], 1 / M_a[i], 0, 1 / M_a[i]],
                 [0, -1 / T_CH[i], 1 / T_CH[i], 0],
                 [-1 / (R_f[i] * T_G[i]), 0, -1 / T_G[i], 0],
                 [-T_tie[i], 0, 0, 0],
@@ -216,33 +219,33 @@ def get_model_dims() -> Tuple[int, int, int]:
 learnable_pars_init_0 = {
     "D": 3.0 * np.ones((1,)),
     "R_f": 0.03 * np.ones((1,)),
-    "M_a": 4 * np.ones((1,)),
-    "T_CH": 5 * np.ones((1,)),
-    "T_G": 4 * np.ones((1,)),
+    "M_a": M_a_list[0] * np.ones((1,)),
+    "T_CH": T_CH_list[0] * np.ones((1,)),
+    "T_G": T_G_list[0] * np.ones((1,)),
     "T_tie": 0 * np.ones((1,)),
 }
 learnable_pars_init_1 = {
     "D": 0.275 * np.ones((1,)),
     "R_f": 0.07 * np.ones((1,)),
-    "M_a": 40 * np.ones((1,)),
-    "T_CH": 10 * np.ones((1,)),
-    "T_G": 25 * np.ones((1,)),
+    "M_a": M_a_list[1] * np.ones((1,)),
+    "T_CH": T_CH_list[1] * np.ones((1,)),
+    "T_G": T_G_list[1] * np.ones((1,)),
     "T_tie": 2.54 * np.ones((1,)),
 }
 learnable_pars_init_2 = {
     "D": 2.0 * np.ones((1,)),
     "R_f": 0.04 * np.ones((1,)),
-    "M_a": 35 * np.ones((1,)),
-    "T_CH": 20 * np.ones((1,)),
-    "T_G": 15 * np.ones((1,)),
+    "M_a": M_a_list[2] * np.ones((1,)),
+    "T_CH": T_CH_list[2] * np.ones((1,)),
+    "T_G": T_G_list[2] * np.ones((1,)),
     "T_tie": 1.5 * np.ones((1,)),
 }
 learnable_pars_init_3 = {
     "D": 2.75 * np.ones((1,)),
     "R_f": 0.03 * np.ones((1,)),
-    "M_a": 10 * np.ones((1,)),
-    "T_CH": 10 * np.ones((1,)),
-    "T_G": 5 * np.ones((1,)),
+    "M_a": M_a_list[3] * np.ones((1,)),
+    "T_CH": T_CH_list[3] * np.ones((1,)),
+    "T_G": T_G_list[3] * np.ones((1,)),
     "T_tie": 2.5 * np.ones((1,)),
 }
 
