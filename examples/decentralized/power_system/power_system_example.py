@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 import casadi as cs
 from csnlp.wrappers.wrapper import Nlp
 import gymnasium as gym
+from gymnasium import Env
 import matplotlib.pyplot as plt
 
 # import networkx as netx
@@ -25,35 +26,54 @@ from scipy.linalg import block_diag
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
 from rldmpc.core.admm import g_map
 from rldmpc.utils.discretisation import zero_order_hold, forward_euler
-from model import (
+from model_Hycon2 import (
     get_cent_model,
     get_model_dims,
-    get_learnable_pars_init_list,
+    get_pars_init_list,
     get_learnable_dynamics,
+    get_P_tie_init,
 )
 
 import pickle
 import datetime
 
-CENTRALISED = False
+CENTRALISED = True
 
-n, nx_l, nu_l = get_model_dims()
+n, nx_l, nu_l, Adj = get_model_dims()  # Adj is adjacency matrix
 u_lim = 0.5
-load_val = 0
+
 
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Discrete time network of four power system areas connected with tie lines."""
 
-    A, B, A_load = get_cent_model()  # Get centralised model
+    load_val = np.array([[0], [-0.15], [0], [0]])
+    # set points for the system
+    x_o_val = np.array(
+        [[
+            0, 0, load_val[0, :].item(), load_val[0, :].item(),
+            0, 0, load_val[1, :].item(), load_val[1, :].item(),
+            0, 0, load_val[2, :].item(), load_val[2, :].item(),
+            0, 0, load_val[3, :].item(), load_val[3, :].item(),
+        ]]
+    ).T
+    u_o_val = load_val.copy()
+
+    A, B, L = get_cent_model()  # Get centralised model
 
     # stage cost params
-    Q_l = np.diag((5, 0, 0, 5))
+    Q_l = np.diag((500, 0.01, 0.01, 10))
     Q = block_diag(*([Q_l] * n))
-    R_l = 1
+    R_l = 10
     R = block_diag(*([R_l] * n))
 
-    load = np.array([[0], [load_val], [0], [0]])  # load ref points
+    load = np.array([[0], [0], [0], [0]])  # load ref points
+    x_o = np.zeros((n*nx_l, 1))
+    u_o = np.zeros((n*nu_l, 1))
+
+    # For controlling load pulses
     step_counter = 0
+    pulse = False
+
     def reset(
         self,
         *,
@@ -69,19 +89,29 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
     ) -> float:
         """Computes stage cost L(s,a)"""
-        return state.T @ self.Q @ state + action.T @ self.R @ action
+        return (state - self.x_o).T @ self.Q @ (state - self.x_o) + (
+            action - self.u_o
+        ).T @ self.R @ (action - self.u_o)
 
     def step(
         self, action: cs.DM
     ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
         """Steps the system."""
         action = action.full()
-        x_new = self.A @ self.x + self.B @ action + self.A_load @ self.load
+        x_new = self.A @ self.x + self.B @ action + self.L @ self.load
 
-        if self.step_counter == 5:
-            d = np.zeros((n*nx_l, 1))
-            d[1*nx_l, :] = 0.025
-            x_new += d
+        if self.step_counter == 100:
+            if not self.pulse:
+                self.load = self.load_val.copy()
+                self.x_o = self.x_o_val.copy()
+                self.u_o = self.u_o_val.copy()
+                self.pulse = True
+            else:
+                self.load[:] = 0
+                self.x_o[:] = 0
+                self.u_o[:] = 0
+                self.pulse = False
+            self.step_counter = 0
         self.step_counter += 1
 
         self.x = x_new
@@ -92,26 +122,42 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 class LinearMpc(Mpc[cs.SX]):
     """The centralised MPC controller."""
 
-    horizon = 20
+    horizon = 15
     discount_factor = 1
 
-    # initialise learnable parameters vals
+    # define which params are learnable
+    to_learn = [f"H_{i}" for i in range(n)]
+    to_learn = to_learn + [f"R_{i}" for i in range(n)]
+    to_learn = to_learn + [f"D_{i}" for i in range(n)]
+    to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
+    to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
+
+    # initialise parameters vals
 
     learnable_pars_init = {}
-    learnable_pars_init_list = get_learnable_pars_init_list()
-    for i in range(n):
-        for name, val in learnable_pars_init_list[i].items():
-            if not (
-                (name == "T_tie") and (i == 0)
-            ):  # first agent has no tie line to control - therefore param fixed to 0
-                learnable_pars_init[f"{name}_{i}"] = val
-
     fixed_pars_init = {
-        "load": np.array([[0], [load_val], [0], [0]]),
-        "T_tie_0": np.array(
-            [0]
-        ),  # first agent has no tie line to control - therefore param fixed to 0
+        "load": np.zeros((n, 1)),
+        "x_o": np.zeros((n*nx_l, 1)),
+        "u_o": np.zeros((n*nu_l, 1))
     }
+
+    # model params
+    pars_init_list = get_pars_init_list()
+    for i in range(n):
+        for name, val in pars_init_list[i].items():
+            if f"{name}_{i}" in to_learn:
+                learnable_pars_init[f"{name}_{i}"] = val
+            else:
+                fixed_pars_init[f"{name}_{i}"] = val
+
+    # coupling params
+    P_tie_init = get_P_tie_init()
+    for i in range(n):
+        for j in range(n):
+            if Adj[i, j] == 1:
+                learnable_pars_init[f"P_tie_{i}_{j}"] = P_tie_init[i, j]
+
+    
 
     def __init__(self) -> None:
         N = self.horizon
@@ -121,18 +167,28 @@ class LinearMpc(Mpc[cs.SX]):
 
         # init params
 
+        H_list = [self.parameter(f"H_{i}", (1,)) for i in range(n)]
+        R__list = [self.parameter(f"R_{i}", (1,)) for i in range(n)]
         D_list = [self.parameter(f"D_{i}", (1,)) for i in range(n)]
-        R_f_list = [self.parameter(f"R_f_{i}", (1,)) for i in range(n)]
-        M_a_list = [self.parameter(f"M_a_{i}", (1,)) for i in range(n)]
-        T_CH_list = [self.parameter(f"T_CH_{i}", (1,)) for i in range(n)]
-        T_G_list = [self.parameter(f"T_G_{i}", (1,)) for i in range(n)]
-        T_tie_list = [self.parameter(f"T_tie_{i}", (1,)) for i in range(n)]
+        T_t_list = [self.parameter(f"T_t_{i}", (1,)) for i in range(n)]
+        T_g_list = [self.parameter(f"T_g_{i}", (1,)) for i in range(n)]
+        P_tie_list_list = []
+        for i in range(n):
+            P_tie_list_list.append([])
+            for j in range(n):
+                if Adj[i, j] == 1:
+                    P_tie_list_list[i].append(self.parameter(f"P_tie_{i}_{j}", (1,)))
+                else:
+                    P_tie_list_list[i].append(0)
 
-        A, B, A_load = get_learnable_dynamics(
-            D_list, R_f_list, M_a_list, T_CH_list, T_G_list, T_tie_list
+        A, B, L = get_learnable_dynamics(
+            H_list, R__list, D_list, T_t_list, T_g_list, P_tie_list_list
         )
 
         load = self.parameter("load", (n, 1))
+        x_o = self.parameter("x_o", (n*nx_l, 1))
+        u_o = self.parameter("u_o", (n*nu_l, 1))
+
         # mpc vars
 
         x, _ = self.state("x", n * nx_l)
@@ -141,22 +197,27 @@ class LinearMpc(Mpc[cs.SX]):
 
         # TODO add state constraints
 
+        # trivial terminal constraint
+        self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
+
         # dynamics
-        self.set_dynamics(
-            lambda x, u: A @ x + B @ u + A_load @ load, n_in=2, n_out=1
-        )
+        self.set_dynamics(lambda x, u: A @ x + B @ u + L @ load, n_in=2, n_out=1)
 
         # objective
 
         # TODO make objective learnable
-        Q_l = np.diag((5, 0, 0, 5))
+        Q_l = np.diag((500, 0.01, 0.01, 10))
         Q = block_diag(*([Q_l] * n))
-        R_l = 1
+        R_l = 10
         R = block_diag(*([R_l] * n))
 
         self.minimize(
             sum(
-                (gamma**k) * (x[:, k].T @ Q @ x[:, k] + u[:, k].T @ R @ u[:, k])
+                (gamma**k)
+                * (
+                    (x[:, k] - x_o).T @ Q @ (x[:, k] - x_o)
+                    + (u[:, k] - u_o).T @ R @ (u[:, k] - u_o)
+                )
                 for k in range(N)
             )
         )
@@ -182,6 +243,16 @@ class LinearMpc(Mpc[cs.SX]):
         self.init_solver(opts, solver="ipopt")
 
 
+# override the learning agent to check for new load values each iter
+class LoadedLstdQLearningAgent(LstdQLearningAgent):
+    def on_timestep_end(self, env, episode: int, timestep: int) -> None:
+        self.fixed_parameters["load"] = env.load
+        self.fixed_parameters["x_o"] = env.x_o
+        self.fixed_parameters["u_o"] = env.u_o
+
+        return super().on_timestep_end(env, episode, timestep)
+
+
 # centralised
 mpc = LinearMpc()
 learnable_pars = LearnableParametersDict[cs.SX](
@@ -191,16 +262,16 @@ learnable_pars = LearnableParametersDict[cs.SX](
     )
 )
 
-env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(8e1)))
+env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(5e2)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
-        LstdQLearningAgent(
+        LoadedLstdQLearningAgent(
             mpc=mpc,
             learnable_parameters=learnable_pars,
             fixed_parameters=mpc.fixed_pars_init,
             discount_factor=mpc.discount_factor,
             update_strategy=1,
-            learning_rate=ExponentialScheduler(4e-2, factor=0.99),
+            learning_rate=ExponentialScheduler(4e-6, factor=1),
             hessian_type="approx",
             record_td_errors=True,
             exploration=None,
@@ -211,7 +282,7 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-agent.evaluate(env=env, episodes=1, seed=1)
+agent.train(env=env, episodes=1, seed=1)
 
 # extract data
 if len(env.observations) > 0:
@@ -223,6 +294,8 @@ else:
     U = np.squeeze(env.ep_actions)
     R = np.squeeze(env.ep_rewards)
 TD = np.squeeze(agent.td_errors)
+param = np.asarray(agent.updates_history["P_tie_0_1"])
+
 time = np.arange(R.size)
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
 axs[0].plot(TD, "o", markersize=1)
@@ -234,5 +307,8 @@ idx = 1  # index of agent to plot
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
 axs[0].plot(X)
 axs[1].plot(U)
+
+_, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
+axs.plot(param)
 
 plt.show()

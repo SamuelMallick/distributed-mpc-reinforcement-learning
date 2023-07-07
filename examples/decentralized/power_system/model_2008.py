@@ -25,6 +25,10 @@ from rldmpc.utils.discretisation import zero_order_hold, forward_euler
 
 # real parameters of the power system - each is a list containing value for each of the four areas
 
+# From Venkat, Aswin N., et al.
+# "Distributed MPC strategies with application to power system automatic generation
+# control." IEEE transactions on control systems technology 16.6 (2008): 1192-1206.
+
 n = 4
 nx_l = 4
 nu_l = 1
@@ -32,10 +36,10 @@ nu_l = 1
 D_list = [3.0, 0.275, 2.0, 2.75]
 R_f_list = [0.03, 0.07, 0.04, 0.03]
 M_a_list = [4, 40, 35, 10]
-#M_a_list = [20, 100, 50, 60]
-#T_CH_list = [5, 10, 20, 10]
+# M_a_list = [20, 100, 50, 60]
+# T_CH_list = [5, 10, 20, 10]
 T_CH_list = [50, 100, 200, 100]
-#T_G_list = [4, 25, 15, 5]
+# T_G_list = [4, 25, 15, 5]
 T_G_list = [40, 250, 150, 50]
 T_tie_list = [0, 2.54, 1.5, 2.5]
 ts = 1  # time-step
