@@ -51,7 +51,7 @@ P_tie = np.array(
         [0, 3, 0, 3, 0],
     ]
 )  # entri (i,j) represent P val between areas i and j
-#P_tie = np.array(
+# P_tie = np.array(
 #    [
 #        [0, 0, 0, 0, 0],
 #        [0, 0, 0, 0, 0],
@@ -59,7 +59,7 @@ P_tie = np.array(
 #        [0, 0, 0, 0, 0],
 #        [0, 0, 0, 0, 0],
 #    ]
-#)
+# )
 ts = 1  # time-step
 
 # construct real dynamics - subscript l is for local components
@@ -230,11 +230,11 @@ def get_model_dims() -> Tuple[int, int, int]:
 # initial guesses for each learnable parameter for each agent
 pars_init = [
     {
-        "H": (H_list[i]) * np.ones((1,)),
-        "R": (R_list[i]) * np.ones((1,)),
-        "D": D_list[i] * np.ones((1,)),
-        "T_t": T_t_list[i] * np.ones((1,)),
-        "T_g": T_g_list[i] * np.ones((1,)),
+        "H": (H_list[i] + np.random.normal(0, 1)) * np.ones((1,)),
+        "R": (R_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
+        "D": (D_list[i] + np.random.normal(0, 2)) * np.ones((1,)),
+        "T_t": (T_t_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
+        "T_g": (T_g_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
     }
     for i in range(n)
 ]
@@ -246,7 +246,7 @@ def get_pars_init_list() -> list[Dict]:
 
 def get_P_tie_init() -> np.ndarray:
     mean = 0
-    dev = 1
+    dev = 2
     P_tie_init = P_tie.copy()
     for i in range(n):
         for j in range(n):

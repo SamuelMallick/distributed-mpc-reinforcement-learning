@@ -38,6 +38,8 @@ from model_Hycon2 import (
 import pickle
 import datetime
 
+np.random.seed(1)
+
 CENTRALISED = True
 
 n, nx_l, nu_l, Adj = get_model_dims()  # Adj is adjacency matrix
@@ -47,17 +49,32 @@ u_lim = 0.5
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Discrete time network of four power system areas connected with tie lines."""
 
-    load_val = np.array([[0], [-0.15], [0], [0]])
-    # set points for the system
-    x_o_val = np.array(
-        [[
-            0, 0, load_val[0, :].item(), load_val[0, :].item(),
-            0, 0, load_val[1, :].item(), load_val[1, :].item(),
-            0, 0, load_val[2, :].item(), load_val[2, :].item(),
-            0, 0, load_val[3, :].item(), load_val[3, :].item(),
-        ]]
-    ).T
-    u_o_val = load_val.copy()
+    def set_points(self, load_val):
+        # set points for the system
+        x_o_val = np.array(
+            [
+                [
+                    0,
+                    0,
+                    load_val[0, :].item(),
+                    load_val[0, :].item(),
+                    0,
+                    0,
+                    load_val[1, :].item(),
+                    load_val[1, :].item(),
+                    0,
+                    0,
+                    load_val[2, :].item(),
+                    load_val[2, :].item(),
+                    0,
+                    0,
+                    load_val[3, :].item(),
+                    load_val[3, :].item(),
+                ]
+            ]
+        ).T
+        u_o_val = load_val.copy()
+        return x_o_val, u_o_val
 
     A, B, L = get_cent_model()  # Get centralised model
 
@@ -68,17 +85,9 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     R = block_diag(*([R_l] * n))
 
     load = np.array([[0], [0], [0], [0]])  # load ref points
-    x_o = np.zeros((n*nx_l, 1))
-    u_o = np.zeros((n*nu_l, 1))
+    x_o = np.zeros((n * nx_l, 1))
+    u_o = np.zeros((n * nu_l, 1))
 
-    # if you want to start with load
-    load = load_val.copy()
-    x_o = x_o_val.copy()
-    u_o = u_o_val.copy()
-
-    # For controlling load pulses
-    step_counter = 0
-    pulse = False
 
     def reset(
         self,
@@ -87,8 +96,10 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the system."""
-        super().reset(seed=seed, options=options)
         self.x = np.zeros((n * nx_l, 1))
+        self.load = np.random.uniform(-0.25, 0.25, (n, 1))
+        self.x_o, self.u_o = self.set_points(self.load)
+        super().reset(seed=seed, options=options)
         return self.x, {}
 
     def get_stage_cost(
@@ -106,20 +117,6 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         action = action.full()
         x_new = self.A @ self.x + self.B @ action + self.L @ self.load
 
-        if self.step_counter == -1:
-            if not self.pulse:
-                self.load = self.load_val.copy()
-                self.x_o = self.x_o_val.copy()
-                self.u_o = self.u_o_val.copy()
-                self.pulse = True
-            else:
-                self.load[:] = 0
-                self.x_o[:] = 0
-                self.u_o[:] = 0
-                self.pulse = False
-            self.step_counter = 0
-        self.step_counter += 1
-
         self.x = x_new
         r = self.get_stage_cost(self.x, action)
         return x_new, r, False, False, {}
@@ -129,13 +126,13 @@ class LinearMpc(Mpc[cs.SX]):
     """The centralised MPC controller."""
 
     horizon = 15
-    discount_factor = 1
+    discount_factor = 0.9
 
     # define which params are learnable
     to_learn = []
-    #to_learn = [f"H_{i}" for i in range(n)]
+    to_learn = [f"H_{i}" for i in range(n)]
     #to_learn = to_learn + [f"R_{i}" for i in range(n)]
-    #to_learn = to_learn + [f"D_{i}" for i in range(n)]
+    to_learn = to_learn + [f"D_{i}" for i in range(n)]
     #to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
     #to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
 
@@ -144,8 +141,8 @@ class LinearMpc(Mpc[cs.SX]):
     learnable_pars_init = {}
     fixed_pars_init = {
         "load": np.zeros((n, 1)),
-        "x_o": np.zeros((n*nx_l, 1)),
-        "u_o": np.zeros((n*nu_l, 1))
+        "x_o": np.zeros((n * nx_l, 1)),
+        "u_o": np.zeros((n * nu_l, 1)),
     }
 
     # model params
@@ -163,8 +160,6 @@ class LinearMpc(Mpc[cs.SX]):
         for j in range(n):
             if Adj[i, j] == 1:
                 learnable_pars_init[f"P_tie_{i}_{j}"] = P_tie_init[i, j]
-
-    
 
     def __init__(self) -> None:
         N = self.horizon
@@ -193,8 +188,8 @@ class LinearMpc(Mpc[cs.SX]):
         )
 
         load = self.parameter("load", (n, 1))
-        x_o = self.parameter("x_o", (n*nx_l, 1))
-        u_o = self.parameter("u_o", (n*nu_l, 1))
+        x_o = self.parameter("x_o", (n * nx_l, 1))
+        u_o = self.parameter("u_o", (n * nu_l, 1))
 
         # mpc vars
 
@@ -258,6 +253,13 @@ class LoadedLstdQLearningAgent(LstdQLearningAgent):
         self.fixed_parameters["u_o"] = env.u_o
 
         return super().on_timestep_end(env, episode, timestep)
+    
+    def on_episode_start(self, env, episode: int) -> None:
+        self.fixed_parameters["load"] = env.load
+        self.fixed_parameters["x_o"] = env.x_o
+        self.fixed_parameters["u_o"] = env.u_o
+        
+        return super().on_episode_start(env, episode)
 
 
 # centralised
@@ -268,8 +270,8 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-
-env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(5e1)))
+ep_len = int(5e1)
+env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LoadedLstdQLearningAgent(
@@ -278,8 +280,8 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_parameters=mpc.fixed_pars_init,
             discount_factor=mpc.discount_factor,
             update_strategy=1,
-            learning_rate=ExponentialScheduler(5e-2, factor=1),
-            hessian_type="approx",
+            learning_rate=ExponentialScheduler(1e-1, factor=1),
+            hessian_type="none",
             record_td_errors=True,
             exploration=None,
             experience=None,
@@ -289,7 +291,7 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 5
+num_eps = 100
 agent.train(env=env, episodes=num_eps, seed=1)
 
 # extract data
@@ -302,20 +304,27 @@ else:
     U = np.squeeze(env.ep_actions)
     R = np.squeeze(env.ep_rewards)
 TD = np.squeeze(agent.td_errors)
-
-param_list = [np.asarray(agent.updates_history[f"P_tie_{i}_{j}"]) for j in range(n) for i in range(n) if Adj[i,j] != 0]
-
+TD_eps = [sum(TD[ep_len*i:ep_len*(i+1)]) for i in range(num_eps)]
+R_eps = [sum(R[ep_len*i:ep_len*(i+1)]) for i in range(num_eps)]
+param_list = [
+    np.asarray(agent.updates_history[f"P_tie_{i}_{j}"])
+    for j in range(n)
+    for i in range(n)
+    if Adj[i, j] != 0
+]
+param_list = param_list + [
+    np.asarray(agent.updates_history[name]) for name in mpc.to_learn
+]
 time = np.arange(R.size)
-_, axs = plt.subplots(4, 1, constrained_layout=True, sharex=True)
-mov_av_size=300
+_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
 axs[0].plot(TD, "o", markersize=1)
-TD_av = pd.Series(TD).rolling(window=mov_av_size).mean()
-axs[1].plot(TD_av, "o", markersize=1)
-axs[2].semilogy(R, "o", markersize=1)
-R_av = pd.Series(R).rolling(window=mov_av_size).mean()
-axs[3].semilogy(R_av, "o", markersize=1)
+axs[1].semilogy(R, "o", markersize=1)
 axs[0].set_ylabel(r"$\tau$")
-axs[2].set_ylabel("$L$")
+axs[1].set_ylabel("$L$")
+
+_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+axs[0].plot(TD_eps, "o", markersize=1)
+axs[1].semilogy(R_eps, "o", markersize=1)
 
 idx = 1  # index of agent to plot
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
