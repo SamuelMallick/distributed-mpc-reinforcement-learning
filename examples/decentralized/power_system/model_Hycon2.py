@@ -51,7 +51,7 @@ P_tie = np.array(
         [0, 3, 0, 3, 0],
     ]
 )  # entri (i,j) represent P val between areas i and j
-# P_tie = np.array(
+#P_tie = np.array(
 #    [
 #        [0, 0, 0, 0, 0],
 #        [0, 0, 0, 0, 0],
@@ -59,7 +59,7 @@ P_tie = np.array(
 #        [0, 0, 0, 0, 0],
 #        [0, 0, 0, 0, 0],
 #    ]
-# )
+#)
 ts = 1  # time-step
 
 # construct real dynamics - subscript l is for local components

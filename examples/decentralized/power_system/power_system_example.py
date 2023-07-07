@@ -7,6 +7,7 @@ from csnlp.wrappers.wrapper import Nlp
 import gymnasium as gym
 from gymnasium import Env
 import matplotlib.pyplot as plt
+import pandas as pd
 
 # import networkx as netx
 import numpy as np
@@ -70,6 +71,11 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     x_o = np.zeros((n*nx_l, 1))
     u_o = np.zeros((n*nu_l, 1))
 
+    # if you want to start with load
+    load = load_val.copy()
+    x_o = x_o_val.copy()
+    u_o = u_o_val.copy()
+
     # For controlling load pulses
     step_counter = 0
     pulse = False
@@ -100,7 +106,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         action = action.full()
         x_new = self.A @ self.x + self.B @ action + self.L @ self.load
 
-        if self.step_counter == 100:
+        if self.step_counter == -1:
             if not self.pulse:
                 self.load = self.load_val.copy()
                 self.x_o = self.x_o_val.copy()
@@ -126,11 +132,12 @@ class LinearMpc(Mpc[cs.SX]):
     discount_factor = 1
 
     # define which params are learnable
-    to_learn = [f"H_{i}" for i in range(n)]
-    to_learn = to_learn + [f"R_{i}" for i in range(n)]
-    to_learn = to_learn + [f"D_{i}" for i in range(n)]
-    to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
-    to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
+    to_learn = []
+    #to_learn = [f"H_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"R_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"D_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
 
     # initialise parameters vals
 
@@ -262,7 +269,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
     )
 )
 
-env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(5e2)))
+env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(5e1)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LoadedLstdQLearningAgent(
@@ -271,7 +278,7 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_parameters=mpc.fixed_pars_init,
             discount_factor=mpc.discount_factor,
             update_strategy=1,
-            learning_rate=ExponentialScheduler(4e-6, factor=1),
+            learning_rate=ExponentialScheduler(5e-2, factor=1),
             hessian_type="approx",
             record_td_errors=True,
             exploration=None,
@@ -282,26 +289,33 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-agent.train(env=env, episodes=1, seed=1)
+num_eps = 5
+agent.train(env=env, episodes=num_eps, seed=1)
 
 # extract data
 if len(env.observations) > 0:
-    X = env.observations[0].squeeze()
-    U = env.actions[0].squeeze()
-    R = env.rewards[0].squeeze()
+    X = np.hstack([env.observations[i].squeeze().T for i in range(num_eps)]).T
+    U = np.hstack([env.actions[i].squeeze().T for i in range(num_eps)]).T
+    R = np.hstack([env.rewards[i].squeeze().T for i in range(num_eps)]).T
 else:
     X = np.squeeze(env.ep_observations)
     U = np.squeeze(env.ep_actions)
     R = np.squeeze(env.ep_rewards)
 TD = np.squeeze(agent.td_errors)
-param = np.asarray(agent.updates_history["P_tie_0_1"])
+
+param_list = [np.asarray(agent.updates_history[f"P_tie_{i}_{j}"]) for j in range(n) for i in range(n) if Adj[i,j] != 0]
 
 time = np.arange(R.size)
-_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+_, axs = plt.subplots(4, 1, constrained_layout=True, sharex=True)
+mov_av_size=300
 axs[0].plot(TD, "o", markersize=1)
-axs[1].semilogy(R, "o", markersize=1)
+TD_av = pd.Series(TD).rolling(window=mov_av_size).mean()
+axs[1].plot(TD_av, "o", markersize=1)
+axs[2].semilogy(R, "o", markersize=1)
+R_av = pd.Series(R).rolling(window=mov_av_size).mean()
+axs[3].semilogy(R_av, "o", markersize=1)
 axs[0].set_ylabel(r"$\tau$")
-axs[1].set_ylabel("$L$")
+axs[2].set_ylabel("$L$")
 
 idx = 1  # index of agent to plot
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
@@ -309,6 +323,6 @@ axs[0].plot(X)
 axs[1].plot(U)
 
 _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
-axs.plot(param)
-
+for param in param_list:
+    axs.plot(param)
 plt.show()
