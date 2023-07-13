@@ -90,9 +90,9 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     x_o = np.zeros((n * nx_l, 1))
     u_o = np.zeros((n * nu_l, 1))
 
-    load_noise_bnd = 1e-2  # uniform noise bound on load noise
+    load_noise_bnd = 1e-1  # uniform noise bound on load noise
 
-    phi_weight = 1  # weight given to power transfer term in stage cost
+    phi_weight = 0  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients
 
     def reset(
@@ -104,7 +104,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         """Resets the state of the system."""
         self.x = np.zeros((n * nx_l, 1))
         #self.load = np.random.uniform(-0.15, 0.15, (n, 1))
-        self.load = np.array([[0, 0.4, 0.3, -0.1]]).T
+        self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
         self.x_o, self.u_o = self.set_points(self.load)
         super().reset(seed=seed, options=options)
         return self.x, {}
@@ -137,7 +137,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         action = action.full()
 
         load_noise = np.random.uniform(
-            -self.load_noise_bnd, self.load_noise_bnd, (n, 1)
+            0, self.load_noise_bnd, (n, 1)
         )
 
         x_new = self.A @ self.x + self.B @ action + self.L @ (self.load + load_noise)
@@ -208,7 +208,7 @@ class LinearMpc(Mpc[cs.SX]):
     horizon = 15
     discount_factor = 0.9
 
-    b_scaling = 0.01    # scale the learnable model offset to prevent instability
+    b_scaling = 0.1    # scale the learnable model offset to prevent instability
 
     # define which params are learnable
     to_learn = []
@@ -220,7 +220,7 @@ class LinearMpc(Mpc[cs.SX]):
     to_learn = to_learn + [f"theta_lb_{i}" for i in range(n)]
     to_learn = to_learn + [f"theta_ub_{i}" for i in range(n)]
     to_learn = to_learn + [f"V0_{i}" for i in range(n)]
-    #to_learn = to_learn + [f"b_{i}" for i in range(n)]
+    to_learn = to_learn + [f"b_{i}" for i in range(n)]
     to_learn = to_learn + [f"f_x_{i}" for i in range(n)]
     to_learn = to_learn + [f"f_u_{i}" for i in range(n)]
     to_learn = to_learn + [f"Q_x_{i}" for i in range(n)]
@@ -302,7 +302,7 @@ class LinearMpc(Mpc[cs.SX]):
         x, _ = self.state("x", n * nx_l)
         u, _ = self.action("u", n * nu_l, lb=-u_lim, ub=u_lim)
         s, _, _ = self.variable(
-            "s", (n, N), lb=0
+            "s", (n, N), lb=0,
         )  # n in first dim as only cnstr on theta
 
         # state constraints
@@ -324,7 +324,7 @@ class LinearMpc(Mpc[cs.SX]):
 
         # trivial terminal constraint
 
-        self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
+        #self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
 
         # dynamics
 
@@ -332,7 +332,7 @@ class LinearMpc(Mpc[cs.SX]):
         for i in range(n):
             b_full = cs.vertcat(b_full, b[i])
         self.set_dynamics(
-            lambda x, u: A @ x + B @ u + L @ load + b_full, n_in=2, n_out=1
+            lambda x, u: A @ x + B @ u + L @ load + self.b_scaling * b_full, n_in=2, n_out=1
         )
 
         # objective
@@ -407,7 +407,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(50e0)
+ep_len = int(20e0)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
@@ -416,15 +416,22 @@ agent = Log(  # type: ignore[var-annotated]
             learnable_parameters=learnable_pars,
             fixed_parameters=mpc.fixed_pars_init,
             discount_factor=mpc.discount_factor,
-            update_strategy=1,
-            learning_rate=ExponentialScheduler(1e-2, factor=1),
+            update_strategy=ep_len,
+            learning_rate=ExponentialScheduler(1e-5, factor=1),
             hessian_type="none",
             record_td_errors=True,
-            exploration=None,
-            experience=None,
-            #ExperienceReplay(
-            #    maxlen=100, sample_size=50, include_latest=10, seed=1
-            #),
+            exploration=#None,
+            EpsilonGreedyExploration(  # None,  # None,  # None,
+                epsilon=ExponentialScheduler(
+                    0.5, factor=0.99
+                ), 
+                strength=0.1 * (2*u_lim),
+                seed=1,
+            ),
+            experience=#None,
+            ExperienceReplay(
+                maxlen=ep_len, sample_size=0.5, include_latest=0.1, seed=1
+            ),
         )
     ),
     level=logging.DEBUG,

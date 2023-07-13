@@ -545,7 +545,7 @@ agent = Log(  # type: ignore[var-annotated]
             exploration=EpsilonGreedyExploration(  # None,  # None,  # None,
                 epsilon=ExponentialScheduler(
                     0.5, factor=0.99
-                ),  # This decays 50x faster for ADMM agents
+                ), 
                 strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),
