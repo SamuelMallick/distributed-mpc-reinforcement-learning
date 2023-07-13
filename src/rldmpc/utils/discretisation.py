@@ -1,5 +1,6 @@
 from typing import Tuple
 import numpy as np
+from scipy.signal import cont2discrete
 
 
 def forward_euler(
@@ -15,8 +16,9 @@ def zero_order_hold(
     A: np.ndarray, B: np.ndarray, ts: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Discretise the continuous time system x_dot = Ax + Bu using ZOH"""
-    Ad = np.exp(ts * A)
-    Bd = np.linalg.inv(A) @ (Ad - np.eye(A.shape[0])) @ B
+    C = np.eye(A.shape[0])
+    D = np.array([[0]])
+    Ad, Bd, Cd, Dd, _ = cont2discrete((A, B, C, D), ts, method="zoh")
     return Ad, Bd
 
 

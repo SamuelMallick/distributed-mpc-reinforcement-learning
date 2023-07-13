@@ -51,15 +51,6 @@ P_tie = np.array(
         [0, 3, 0, 3, 0],
     ]
 )  # entri (i,j) represent P val between areas i and j
-# P_tie = np.array(
-#    [
-#        [0, 0, 0, 0, 0],
-#        [0, 0, 0, 0, 0],
-#        [0, 0, 0, 0, 0],
-#        [0, 0, 0, 0, 0],
-#        [0, 0, 0, 0, 0],
-#    ]
-# )
 ts = 1  # time-step
 
 # construct real dynamics - subscript l is for local components
@@ -137,10 +128,12 @@ def dynamics_from_parameters(
     )
 
     # disrctised
-    A_d, B_d = forward_euler(A, B, ts)
-    L_d = ts * L
-    # A_d, B_d = zero_order_hold(A, B, ts)
-    # L_d = np.linalg.inv(A)@(np.exp(A*ts) - np.eye(A.shape[0]))@L
+    # A_d, B_d = forward_euler(A, B, ts)
+    # L_d = ts * L
+    B_comb = np.hstack((B, L))
+    A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
+    B_d = B_d_comb[:, :n]
+    L_d = B_d_comb[:, n:]
 
     return A_d, B_d, L_d
 
@@ -211,8 +204,10 @@ def learnable_dynamics_from_parameters(
     )
 
     # disrctised
-    A_d, B_d = forward_euler(A, B, ts)
-    L_d = ts * L
+    B_comb = cs.horzcat(B, L)
+    A_d, B_d_comb = forward_euler(A, B_comb, ts)
+    B_d = B_d_comb[:, :n]
+    L_d = B_d_comb[:, n:]
 
     return A_d, B_d, L_d
 
@@ -230,11 +225,19 @@ def get_model_dims() -> Tuple[int, int, int]:
 # initial guesses for each learnable parameter for each agent
 pars_init = [
     {
-        "H": (H_list[i] + np.random.normal(0, 1)) * np.ones((1,)),
+        "H": (H_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
         "R": (R_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
-        "D": (D_list[i] + np.random.normal(0, 2)) * np.ones((1,)),
+        "D": (D_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
         "T_t": (T_t_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
         "T_g": (T_g_list[i] + np.random.normal(0, 0)) * np.ones((1,)),
+        "theta_lb": 0 * np.ones((1,)),
+        "theta_ub": 0 * np.ones((1,)),
+        "V0": 0 * np.ones((1,)),
+        "b": 0 * np.ones((nx_l,)),
+        "f_x": 0 * np.ones((nx_l, 1)),
+        "f_u": 0 * np.ones((nu_l, 1)),
+        "Q_x": np.diag((500, 0.1, 0.1, 10)),
+        "Q_u": 10 * np.ones((1, 1)),
     }
     for i in range(n)
 ]
@@ -246,7 +249,7 @@ def get_pars_init_list() -> list[Dict]:
 
 def get_P_tie_init() -> np.ndarray:
     mean = 0
-    dev = 2
+    dev = 0
     P_tie_init = P_tie.copy()
     for i in range(n):
         for j in range(n):
