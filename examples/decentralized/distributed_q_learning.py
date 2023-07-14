@@ -543,9 +543,7 @@ agent = Log(  # type: ignore[var-annotated]
             hessian_type="none",
             record_td_errors=True,
             exploration=EpsilonGreedyExploration(  # None,  # None,  # None,
-                epsilon=ExponentialScheduler(
-                    0.5, factor=0.99
-                ), 
+                epsilon=ExponentialScheduler(0.5, factor=0.99),
                 strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),

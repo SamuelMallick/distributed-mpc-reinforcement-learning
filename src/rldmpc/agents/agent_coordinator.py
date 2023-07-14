@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
     """Coordinator to handle the communication and learning of a multi-agent q-learning system."""
 
-    iters = 50  # number of iters in ADMM procedure
+    iters = 200  # number of iters in ADMM procedure
 
     def __init__(
         self,
@@ -85,6 +85,14 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         )
 
         if not centralised_flag:  # act as a coordinator of learning agents
+            # configure copies of exploration with different rndom generators to avoid all agents exploring identicaly
+            exploration_list = [None]*n
+            if exploration is not None:
+                for i in range(n):
+                    new_exp = deepcopy(exploration)
+                    new_exp.reset(i)    # reseting with new seed
+                    exploration_list[i] = StepWiseExploration(new_exp, self.iters)  # step wise to account for ADMM iters
+
             self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
@@ -96,7 +104,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                             deepcopy(learning_rate),
                             learnable_dist_parameters_list[i],
                             fixed_dist_parameters_list[i],
-                            deepcopy(exploration),
+                            exploration_list[i],
                             deepcopy(experience),
                             max_percentage_update,
                             warmstart,
@@ -155,8 +163,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         raises: bool = True,
         env_reset_options: Optional[Dict[str, Any]] = None,
     ):
-        for agent in self.agents:
-            agent.reset(seed)
+        if not self.centralised_flag:
+            for agent in self.agents:
+                agent.reset(seed)
         return super().evaluate(env, episodes, seed, raises, env_reset_options)
 
     def train_one_episode(
@@ -233,7 +242,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 new_state, cost, truncated, terminated, info_dict = env.step(
                     joint_action
                 )
-                dist_costs = info_dict["r_dist"]  # get distributed costs from env dict
+                if "r_dist" in info_dict.keys(): # get distributed costs from env dict if its there
+                    dist_costs = info_dict["r_dist"]  
+                else:
+                    dist_costs = None
+
                 self.on_env_step(env, episode, timestep)  # step centralised
                 for agent in self.agents:  # step distributed agents
                     agent.on_env_step(env, episode, timestep)
@@ -259,7 +272,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
                 V_f = self.consensus(V_f_vec)[0] * len(self.agents)
                 Q_f = self.consensus(Q_f_vec)[0] * len(self.agents)
-                cost_f = self.consensus(np.asarray(dist_costs))[0] * len(self.agents)
+                if dist_costs is not None:
+                    cost_f = self.consensus(np.asarray(dist_costs))[0] * len(self.agents)
+                else:
+                    cost_f = cost
                 for i in range(len(self.agents)):  # store experience for agents
                     object.__setattr__(
                         solV_list[i], "f", V_f
@@ -362,7 +378,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         sum += self.x_temp_list[j][x_slice, :]
                 self.z[self.nx_l * i : self.nx_l * (i + 1), :] = sum / count
 
-            plot_list.append(local_sol_list[1].vals["u"])
+            plot_list.append(local_sol_list[2].vals["u"])
+            #plot_list.append(self.x_temp_list[2] - self.z[self.z_slices[2], :])
+            #plot_list.append(self.x_temp_list[0])
+            #plot_list.append(self.z[self.z_slices[0], :])
 
             # y update TODO parallelise
             for i in range(len(self.agents)):
@@ -370,9 +389,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     self.x_temp_list[i] - self.z[self.z_slices[i], :]
                 )
 
-        plot_list = np.asarray(plot_list)
-        # plt.plot(plot_list[:, :, 2])
-        # plt.show()
+        #plot_list = np.asarray(plot_list)
+        #plt.plot(plot_list[:, :, 0])
+        #plt.show()
 
         return (
             loc_action_list,

@@ -33,6 +33,7 @@ from model_Hycon2 import (
     get_pars_init_list,
     get_learnable_dynamics,
     get_P_tie_init,
+    get_learnable_dynamics_local,
 )
 
 import pickle
@@ -40,12 +41,23 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = True
+CENTRALISED = False
 
 n, nx_l, nu_l, Adj = get_model_dims()  # Adj is adjacency matrix
 u_lim = 0.5
 theta_lim = 0.1
-w = 100 * np.ones((n, 1))  # penalty on state viols
+w = 200 * np.ones((n, 1))  # penalty on state viols
+w_l = 200   # local penalty on state viols
+b_scaling = 0.1  # scale the learnable model offset to prevent instability
+
+prediction_length = 5   # length of prediction horizon
+
+# distributed stuff
+G = g_map(Adj)
+eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
+D_in = np.array([[1, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]])  # Hard coded D_in matrix from Adj
+L = D_in - Adj  # graph laplacian
+P = np.eye(n) - eps * L  # consensus matrix
 
 
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
@@ -103,8 +115,9 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the system."""
         self.x = np.zeros((n * nx_l, 1))
-        #self.load = np.random.uniform(-0.15, 0.15, (n, 1))
+        # self.load = np.random.uniform(-0.15, 0.15, (n, 1))
         self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
+        #self.load = np.array([[0, 0.2, 0.3, -0.1]]).T
         self.x_o, self.u_o = self.set_points(self.load)
         super().reset(seed=seed, options=options)
         return self.x, {}
@@ -119,7 +132,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             + self.phi_weight
             * (  # power transfer term
                 sum(
-                    np.abs(self.P_tie_list[i, j] * (state[i*nx_l]- state[j*nx_l]))
+                    np.abs(self.P_tie_list[i, j] * (state[i * nx_l] - state[j * nx_l]))
                     for j in range(n)
                     for i in range(n)
                     if Adj[i, j] == 1
@@ -136,9 +149,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         """Steps the system."""
         action = action.full()
 
-        load_noise = np.random.uniform(
-            0, self.load_noise_bnd, (n, 1)
-        )
+        load_noise = np.random.uniform(0, self.load_noise_bnd, (n, 1))
 
         x_new = self.A @ self.x + self.B @ action + self.L @ (self.load + load_noise)
 
@@ -150,18 +161,18 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 class MPCAdmm(Mpc[cs.SX]):
     """MPC for agent inner prob in ADMM."""
 
-    rho = 0.5
+    rho = 50
 
-    horizon = 15
+    horizon = prediction_length
     discount_factor = 0.9
 
     # define learnable parameters
 
     to_learn = []
-    to_learn = to_learn + ["H"]
-    to_learn = to_learn + ["D"]
-    to_learn = to_learn + ["T_t"]
-    to_learn = to_learn + ["T_g"]
+    # to_learn = to_learn + ["H"]
+    # to_learn = to_learn + ["D"]
+    # to_learn = to_learn + ["T_t"]
+    # to_learn = to_learn + ["T_g"]
     to_learn = to_learn + ["theta_lb_"]
     to_learn = to_learn + ["theta_ub_"]
     to_learn = to_learn + ["V0"]
@@ -171,12 +182,12 @@ class MPCAdmm(Mpc[cs.SX]):
     to_learn = to_learn + ["Q_x"]
     to_learn = to_learn + ["Q_u"]
 
-    def __init__(self, num_neighbours, my_index, P_tie_init) -> None:
+    def __init__(self, num_neighbours, my_index, pars_init, P_tie_init) -> None:
         """Instantiate inner MPC for admm. My index is used to pick out own state from the grouped coupling states. It should be passed in via the mapping G (G[i].index(i))"""
 
         # add coupling to learn
         for i in range(num_neighbours):
-            to_learn = to_learn + ["P_tie_{i}"]
+            self.to_learn = self.to_learn + [f"P_tie_{i}"]
 
         N = self.horizon
         gamma = self.discount_factor
@@ -185,38 +196,161 @@ class MPCAdmm(Mpc[cs.SX]):
 
         # init param vals
 
-        learnable_pars_init = {}
-        fixed_pars_init = {
+        self.learnable_pars_init = {}
+        self.fixed_pars_init = {
             "load": np.zeros((n, 1)),
             "x_o": np.zeros((n * nx_l, 1)),
             "u_o": np.zeros((n * nu_l, 1)),
+            "y": np.zeros(
+                (nx_l * (num_neighbours + 1), N)
+            ),  # lagrange multipliers ADMM
+            "z": np.zeros((nx_l * (num_neighbours + 1), N)),  # global consensus vars
         }
 
         # model params
-        pars_init_list = get_pars_init_list()
-        for i in range(n):
-            for name, val in pars_init_list[i].items():
-                if name in to_learn:
-                    learnable_pars_init[name] = val
-                else:
-                    fixed_pars_init[name] = val
+        for name, val in pars_init.items():
+            if name in self.to_learn:
+                self.learnable_pars_init[name] = val
+            else:
+                self.fixed_pars_init[name] = val
+        for i in range(num_neighbours):
+            if f"P_tie_{i}" in self.to_learn:
+                self.learnable_pars_init[f"P_tie_{i}"] = P_tie_init[i]
+            else:
+                self.fixed_pars_init[f"P_tie_{i}"] = P_tie_init[i]
+
+        # create the params
+
+        H = self.parameter("H", (1,))
+        R = self.parameter("R", (1,))
+        D = self.parameter("D", (1,))
+        T_t = self.parameter("T_t", (1,))
+        T_g = self.parameter("T_g", (1,))
+        P_tie_list = []
+        for i in range(num_neighbours):
+            P_tie_list.append(self.parameter(f"P_tie_{i}", (1,)))
+
+        theta_lb = self.parameter(f"theta_lb", (1,))
+        theta_ub = self.parameter(f"theta_ub", (1,))
+
+        V0 = self.parameter(f"V0", (1,))
+        b = self.parameter(f"b", (nx_l,))
+        f_x = self.parameter(f"f_x", (nx_l,))
+        f_u = self.parameter(f"f_u", (nu_l,))
+        Q_x = self.parameter(f"Q_x", (nx_l, nx_l))
+        Q_u = self.parameter(f"Q_u", (nu_l, nu_l))
+
+        y = self.parameter("y", (nx_l * (num_neighbours + 1), N))
+        z = self.parameter("z", (nx_l * (num_neighbours + 1), N))
+
+        load = self.parameter("load", (1, 1))
+        x_o = self.parameter("x_o", (nx_l, 1))
+        u_o = self.parameter("u_o", (nu_l, 1))
+
+        A, B, L, A_c_list = get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list)
+
+        x, _ = self.state("x", nx_l)  # local state
+        x_c, _, _ = self.variable("x_c", (nx_l * (num_neighbours), N))  # coupling
+
+        # adding them together as the full decision var
+        x_cat = cs.vertcat(
+            x_c[: (my_index * nx_l), :], x[:, :-1], x_c[(my_index * nx_l) :, :]
+        )
+        u, _ = self.action(
+            "u",
+            nu_l,
+            lb=-u_lim,
+            ub=u_lim,
+        )
+        s, _, _ = self.variable("s", (1, N), lb=0)  # dim 1 as only theta has bound
+
+        x_c_list = (
+            []
+        )  # store the bits of x that are couplings in a list for ease of access
+        for i in range(num_neighbours):
+            x_c_list.append(x_c[nx_l * i : nx_l * (i + 1), :])
+
+        # dynamics - added manually due to coupling
+
+        for k in range(N):
+            coup = cs.SX.zeros(nx_l, 1)
+            for i in range(num_neighbours):  # get coupling expression
+                coup += A_c_list[i] @ x_c_list[i][:, [k]]
+            self.constraint(
+                "dynam_" + str(k),
+                A @ x[:, [k]] + B @ u[:, [k]] + L @ load + coup + b_scaling * b,
+                "==",
+                x[:, [k + 1]],
+            )
+
+        # other constraints
+
+        self.constraint(f"theta_lb", -theta_lim + theta_lb - s, "<=", x[0, 1:])
+        self.constraint(f"theta_ub", x[0, 1:], "<=", theta_lim + theta_ub + s)
+
+        # objective
+        self.minimize(
+            V0
+            + sum(
+                f_x.T @ x[:, k]
+                + f_u.T @ u[:, k]
+                + (gamma**k)
+                * (
+                    (x[:, k] - x_o).T @ Q_x @ (x[:, k] - x_o)
+                    + (u[:, k] - u_o).T @ Q_u @ (u[:, k] - u_o)
+                    + w_l * s[:, [k]]
+                ) for k in range(N)
+            )
+            + sum(
+                (y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N)
+            )
+            + sum(
+                ((self.rho / 2) * cs.norm_2(x_cat[:, [k]] - z[:, [k]]) ** 2)
+                for k in range(N)
+            )
+        )
+
+        self.x_dim = (
+            x_cat.shape
+        )  # assigning it to class so that the dimension can be retreived later by admm procedure
+        self.nx_l = nx_l
+        self.nu_l = nu_l
+
+        # solver
+
+        opts = {
+            "expand": True,
+            "print_time": False,
+            "bound_consistency": True,
+            "calc_lam_x": True,
+            "calc_lam_p": False,
+            # "jit": True,
+            # "jit_cleanup": True,
+            "ipopt": {
+                # "linear_solver": "ma97",
+                # "linear_system_scaling": "mc19",
+                # "nlp_scaling_method": "equilibration-based",
+                "max_iter": 2000,
+                "sb": "yes",
+                "print_level": 0,
+            },
+        }
+        self.init_solver(opts, solver="ipopt")
 
 
 class LinearMpc(Mpc[cs.SX]):
     """The centralised MPC controller."""
 
-    horizon = 15
+    horizon = prediction_length
     discount_factor = 0.9
-
-    b_scaling = 0.1    # scale the learnable model offset to prevent instability
 
     # define which params are learnable
     to_learn = []
-    # to_learn = [f"H_{i}" for i in range(n)]
-    # to_learn = to_learn + [f"R_{i}" for i in range(n)]
-    # to_learn = to_learn + [f"D_{i}" for i in range(n)]
-    # to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
-    # to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
+    to_learn = [f"H_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"R_{i}" for i in range(n)]
+    to_learn = to_learn + [f"D_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
     to_learn = to_learn + [f"theta_lb_{i}" for i in range(n)]
     to_learn = to_learn + [f"theta_ub_{i}" for i in range(n)]
     to_learn = to_learn + [f"V0_{i}" for i in range(n)]
@@ -302,7 +436,9 @@ class LinearMpc(Mpc[cs.SX]):
         x, _ = self.state("x", n * nx_l)
         u, _ = self.action("u", n * nu_l, lb=-u_lim, ub=u_lim)
         s, _, _ = self.variable(
-            "s", (n, N), lb=0,
+            "s",
+            (n, N),
+            lb=0,
         )  # n in first dim as only cnstr on theta
 
         # state constraints
@@ -324,7 +460,7 @@ class LinearMpc(Mpc[cs.SX]):
 
         # trivial terminal constraint
 
-        #self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
+        # self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
 
         # dynamics
 
@@ -332,7 +468,7 @@ class LinearMpc(Mpc[cs.SX]):
         for i in range(n):
             b_full = cs.vertcat(b_full, b[i])
         self.set_dynamics(
-            lambda x, u: A @ x + B @ u + L @ load + self.b_scaling * b_full, n_in=2, n_out=1
+            lambda x, u: A @ x + B @ u + L @ load + b_scaling * b_full, n_in=2, n_out=1
         )
 
         # objective
@@ -383,11 +519,17 @@ class LinearMpc(Mpc[cs.SX]):
 
 
 # override the learning agent to check for new load values each iter
-class LoadedLstdQLearningAgent(LstdQLearningAgent):
+class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
     def on_timestep_end(self, env, episode: int, timestep: int) -> None:
         self.fixed_parameters["load"] = env.load
         self.fixed_parameters["x_o"] = env.x_o
         self.fixed_parameters["u_o"] = env.u_o
+
+        if not self.centralised_flag:
+            for i in range(n):
+                self.agents[i].fixed_parameters["load"] = env.load[i]
+                self.agents[i].fixed_parameters["x_o"] = env.x_o[nx_l*i:nx_l*(i+1)]
+                self.agents[i].fixed_parameters["u_o"] = env.u_o[i]
 
         return super().on_timestep_end(env, episode, timestep)
 
@@ -396,8 +538,36 @@ class LoadedLstdQLearningAgent(LstdQLearningAgent):
         self.fixed_parameters["x_o"] = env.x_o
         self.fixed_parameters["u_o"] = env.u_o
 
+        if not self.centralised_flag:
+            for i in range(n):
+                self.agents[i].fixed_parameters["load"] = env.load[i]
+                self.agents[i].fixed_parameters["x_o"] = env.x_o[nx_l*i:nx_l*(i+1)]
+                self.agents[i].fixed_parameters["u_o"] = env.u_o[i]
+
         return super().on_episode_start(env, episode)
 
+
+# decentralised
+P_tie_init = get_P_tie_init()
+# distributed mpc and params
+mpc_dist_list: list[Mpc] = []
+learnable_dist_parameters_list: list[LearnableParametersDict] = []
+fixed_dist_parameters_list: list = []
+
+pars_init_list = get_pars_init_list()
+for i in range(n):
+    mpc_dist_list.append(MPCAdmm(num_neighbours=len(G[i]) - 1, my_index=G[i].index(i), pars_init= pars_init_list[i], P_tie_init=[P_tie_init[i, j] for j in range(n) if Adj[i,j] != 0]))
+    learnable_dist_parameters_list.append(
+        LearnableParametersDict[cs.SX](
+            (
+                LearnableParameter(
+                    name, val.shape, val, sym=mpc_dist_list[i].parameters[name]
+                )
+                for name, val in mpc_dist_list[i].learnable_pars_init.items()
+            )
+        )
+    )
+    fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 # centralised
 mpc = LinearMpc()
@@ -407,38 +577,45 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(20e0)
+ep_len = int(10e0)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
-        LoadedLstdQLearningAgent(
-            mpc=mpc,
+        LoadedLstdQLearningAgentCoordinator(
+            rho=MPCAdmm.rho,
+            n=n,
+            G=G,
+            P=P,
+            centralised_flag=CENTRALISED,
+            centralised_debug=True,
+            mpc_cent=mpc,
             learnable_parameters=learnable_pars,
             fixed_parameters=mpc.fixed_pars_init,
+            mpc_dist_list=mpc_dist_list,
+            learnable_dist_parameters_list=learnable_dist_parameters_list,
+            fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=ep_len,
-            learning_rate=ExponentialScheduler(1e-5, factor=1),
+            learning_rate=ExponentialScheduler(0, factor=1), #5e-6
             hessian_type="none",
             record_td_errors=True,
-            exploration=#None,
-            EpsilonGreedyExploration(  # None,  # None,  # None,
-                epsilon=ExponentialScheduler(
-                    0.5, factor=0.99
-                ), 
-                strength=0.1 * (2*u_lim),
-                seed=1,
-            ),
-            experience=#None,
-            ExperienceReplay(
-                maxlen=ep_len, sample_size=0.5, include_latest=0.1, seed=1
-            ),
+            exploration= None,
+            #EpsilonGreedyExploration(
+            #    epsilon=ExponentialScheduler(0.5, factor=0.99), 
+            #    strength=0.1 * (2*u_lim),
+            #    seed=1,
+            #),
+            experience=None,
+            #ExperienceReplay(
+            #    maxlen=ep_len, sample_size=0.5, seed=1
+            #),  # None,
         )
     ),
     level=logging.DEBUG,
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 50
+num_eps = 1
 agent.train(env=env, episodes=num_eps, seed=1)
 
 # extract data

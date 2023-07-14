@@ -1,6 +1,7 @@
 import numpy as np
 import cvxpy as cp
 
+np.random.seed(1)
 
 def g_map(Adj: np.ndarray):
     """Construct the ADMM mapping from local to global variables from an adjacency matrix."""
@@ -49,9 +50,9 @@ def admm(
     """Calculates the ADMM solution to the the optimisation problem given."""
 
     iters = 100  # number of iterations for the algorithm
-    rho = 0.8  # penalty co-efficient
+    rho = 0.3  # penalty co-efficient
 
-    alpha = alpha_prev = 1  # for fast ADMM
+    alpha = alpha_m1 = 1  # for fast ADMM
 
     n = len(G)  # number of agents
     nx_l = x_list[0].shape[0]  # dimension of local vars
@@ -59,18 +60,18 @@ def admm(
     # create auxillary vars: y - lagrange multipliers for consensus constraints, z - global vars, and temporary x vars - x_temp
 
     y_list: list[np.ndarray] = []
-    y_prev_list: list[np.ndarray] = []  # for fast ADMM
+    y_list_m1: list[np.ndarray] = []  # for fast ADMM
     x_temp_list: list[np.ndarray] = []  # stores the intermediate numerical values for x
     dual_temp_list: list[np.ndarray] = []  # dual vals of from inner probs
     for i in range(n):
         y_list.append(np.zeros(x_list[i].shape))
-        y_prev_list.append(np.zeros(x_list[i].shape))
+        y_list_m1.append(np.zeros(x_list[i].shape))
         x_temp_list.append(np.zeros(x_list[i].shape))
         dual_temp_list.append(
             np.zeros((constraint_list[i][0].shape[0], len(constraint_list[i])))
         )
     z = np.zeros((nx_l, n))
-    z_prev = z.copy()  # for fast ADMM
+    z_m1 = z.copy()  # for fast ADMM
 
     for iter in range(iters):
         # x-update - TODO parallelise
@@ -99,7 +100,7 @@ def admm(
             z[:, [i]] = sum / count  # average the opinions
 
         if iter == 0:
-            z_prev = z.copy()
+            z_m1 = z.copy()
 
         # y-update - TODO parallelise
 
@@ -107,29 +108,29 @@ def admm(
             z_temp = z[:, [j for j in G[i]]]  # global vars relevant for agent i
             y_list[i] = y_list[i] + rho * (x_temp_list[i] - z_temp)
             if iter == 0:
-                y_prev_list[i] = y_list[i].copy()
+                y_list_m1[i] = y_list[i].copy()
 
         # alpha update
 
-        alpha = (1 + np.sqrt(1 + 4 * alpha_prev**2)) / 2
+        alpha = (1 + np.sqrt(1 + 4 * alpha**2)) / 2
 
         # second z update
 
-        z = z + ((alpha_prev - 1) / alpha) * (z - z_prev)
+        z = z + ((alpha_m1 - 1) / alpha) * (z - z_m1)
 
         # second y update
 
         for i in range(n):
-            y_list[i] = y_list[i] + ((alpha_prev - 1) / alpha) * (
-                y_list[i] - y_prev_list[i]
+            y_list[i] = y_list[i] + ((alpha_m1 - 1) / alpha) * (
+                y_list[i] - y_list_m1[i]
             )
 
         # increment history tracking vars
 
-        alpha_prev = alpha
-        z_prev = z.copy()
+        alpha_m1 = alpha
+        z_m1 = z.copy()
         for i in range(n):
-            y_prev_list[i] = y_list[i].copy()
+            y_list_m1[i] = y_list[i].copy()
 
     return [x_list[i].value for i in range(n)], dual_temp_list
 
@@ -154,8 +155,9 @@ if __name__ == "__main__":
     cost_list: list[cp.Expression] = []
     cost_glob = 0  # global cost
     for i in range(n):
-        Q = np.random.rand(nx_l, nx_l)
-        Q = Q @ Q.T
+        #Q = np.random.rand(nx_l, nx_l)
+        #Q = Q @ Q.T
+        Q = np.array([[1+i, 0.1], [0.1, 2+i]])
         f = 2 * np.random.rand(nx_l, 1) - 1
         local_var = x_list[i][
             :, G[i].index(i)

@@ -270,3 +270,46 @@ def get_learnable_dynamics(
         H_list, R_list, D_list, T_t_list, T_g_list, P_tie_list_list, ts
     )
     return A, B, L
+
+
+def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
+    return learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts)
+
+
+def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
+    A = np.array(
+        [
+            [0, 1, 0, 0],
+            [
+                -sum(P_tie_list) / (2 * H),
+                -D / (2 * H),
+                1 / (2 * H),
+                0,
+            ],
+            [0, 0, -1 / T_t, 1 / T_t],
+            [0, -1 / (R * T_g), 0, -1 / T_g],
+        ]
+    )
+    B = np.array([[0], [0], [0], [1 / T_g]])
+    L = np.array([[0], [-1 / (2 * H)], [0], [0]])
+
+    B_comb = cs.horzcat(B, L)
+    A_d, B_d_comb = forward_euler(A, B_comb, ts)
+    B_d = B_d_comb[:, :nu_l]
+    L_d = B_d_comb[:, nu_l:]
+
+    A_c_list = []
+    for i in range(len(P_tie_list)):
+        A_c_list.append(
+            ts
+            * np.array(  # multiplie by ts for forward euler discretisation
+                [
+                    [0, 0, 0, 0],
+                    [P_tie_list[i] / (2 * H), 0, 0, 0],
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                ]
+            )
+        )
+
+    return A_d, B_d, L_d, A_c_list
