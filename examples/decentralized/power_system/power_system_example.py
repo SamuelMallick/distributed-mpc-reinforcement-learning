@@ -41,7 +41,7 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = False
+CENTRALISED = True
 
 n, nx_l, nu_l, Adj = get_model_dims()  # Adj is adjacency matrix
 u_lim = 0.5
@@ -93,16 +93,16 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     A, B, L = get_cent_model()  # Get centralised model
 
     # stage cost params
-    Q_l = np.diag((500, 0.01, 0.01, 10))
-    Q = block_diag(*([Q_l] * n))
-    R_l = 10
-    R = block_diag(*([R_l] * n))
+    Q_x_l = np.diag((500, 0.01, 0.01, 10))
+    Q_x = block_diag(*([Q_x_l] * n))
+    Q_u_l = 10
+    Q_u = block_diag(*([Q_u_l] * n))
 
     load = np.array([[0], [0], [0], [0]])  # load ref points
     x_o = np.zeros((n * nx_l, 1))
     u_o = np.zeros((n * nu_l, 1))
 
-    load_noise_bnd = 1e-1  # uniform noise bound on load noise
+    load_noise_bnd = 1e-1 #1e-1  # uniform noise bound on load noise
 
     phi_weight = 0  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients
@@ -118,6 +118,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         # self.load = np.random.uniform(-0.15, 0.15, (n, 1))
         self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
         #self.load = np.array([[0, 0.2, 0.3, -0.1]]).T
+        #self.load = np.zeros((n, 1))
         self.x_o, self.u_o = self.set_points(self.load)
         super().reset(seed=seed, options=options)
         return self.x, {}
@@ -127,8 +128,8 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> float:
         """Computes stage cost L(s,a)"""
         return (
-            (state - self.x_o).T @ self.Q @ (state - self.x_o)
-            + (action - self.u_o).T @ self.R @ (action - self.u_o)
+            (state - self.x_o).T @ self.Q_x @ (state - self.x_o)
+            + (action - self.u_o).T @ self.Q_u @ (action - self.u_o)
             + self.phi_weight
             * (  # power transfer term
                 sum(
@@ -153,8 +154,8 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
         x_new = self.A @ self.x + self.B @ action + self.L @ (self.load + load_noise)
 
-        self.x = x_new
         r = self.get_stage_cost(self.x, action)
+        self.x = x_new
         return x_new, r, False, False, {}
 
 
@@ -346,9 +347,9 @@ class LinearMpc(Mpc[cs.SX]):
 
     # define which params are learnable
     to_learn = []
-    to_learn = [f"H_{i}" for i in range(n)]
+    #to_learn = [f"H_{i}" for i in range(n)]
     #to_learn = to_learn + [f"R_{i}" for i in range(n)]
-    to_learn = to_learn + [f"D_{i}" for i in range(n)]
+    #to_learn = to_learn + [f"D_{i}" for i in range(n)]
     #to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
     #to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
     to_learn = to_learn + [f"theta_lb_{i}" for i in range(n)]
@@ -460,7 +461,7 @@ class LinearMpc(Mpc[cs.SX]):
 
         # trivial terminal constraint
 
-        # self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
+        #self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
 
         # dynamics
 
@@ -488,15 +489,16 @@ class LinearMpc(Mpc[cs.SX]):
                 f_x_full.T @ x[:, k]
                 + f_u_full.T @ u[:, k]
                 + (gamma**k)
-                * (
+               * (
                     (x[:, k] - x_o).T @ Q_x_full @ (x[:, k] - x_o)
                     + (u[:, k] - u_o).T @ Q_u_full @ (u[:, k] - u_o)
                     + w.T @ s[:, [k]]
                 )
-                for k in range(N)
+               for k in range(N)
             )
+            + (gamma**N)*(x[:, N] - x_o).T@Q_x_full@(x[:,N] - x_o)
         )
-
+        
         # solver
         opts = {
             "expand": True,
@@ -577,7 +579,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(10e0)
+ep_len = int(50e0)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
@@ -596,26 +598,26 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=ep_len,
-            learning_rate=ExponentialScheduler(0, factor=1), #5e-6
+            learning_rate=ExponentialScheduler(5e-6, factor=1), #5e-6
             hessian_type="none",
             record_td_errors=True,
-            exploration= None,
-            #EpsilonGreedyExploration(
-            #    epsilon=ExponentialScheduler(0.5, factor=0.99), 
-            #    strength=0.1 * (2*u_lim),
-            #    seed=1,
-            #),
-            experience=None,
-            #ExperienceReplay(
-            #    maxlen=ep_len, sample_size=0.5, seed=1
-            #),  # None,
+            exploration= #None,
+            EpsilonGreedyExploration(
+                epsilon=ExponentialScheduler(0.5, factor=0.99), 
+                strength=0.1 * (2*u_lim),
+                seed=1,
+            ),
+            experience=#None,
+            ExperienceReplay(
+                maxlen=ep_len, sample_size=0.5, seed=1
+            ),  # None,
         )
     ),
     level=logging.DEBUG,
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 1
+num_eps = 200
 agent.train(env=env, episodes=num_eps, seed=1)
 
 # extract data

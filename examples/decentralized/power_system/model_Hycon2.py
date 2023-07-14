@@ -37,18 +37,17 @@ nu_l = 1
 Adj = np.array([[0, 1, 0, 0], [1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]])
 
 # Lists include 5 entries as up to 5 agents can be used
-H_list = [12.0, 10, 8, 8, 10]
-R_list = [0.05, 0.0625, 0.08, 0.08, 0.05]
-D_list = [0.7, 0.9, 0.9, 0.7, 0.86]
-T_t_list = [0.65, 0.4, 0.3, 0.6, 0.8]
-T_g_list = [0.1, 0.1, 0.1, 0.1, 0.15]
+H_list = [12.0, 10, 8, 8]
+R_list = [0.05, 0.0625, 0.08, 0.08]
+D_list = [0.7, 0.9, 0.9, 0.7]
+T_t_list = [0.65, 0.4, 0.3, 0.6]
+T_g_list = [0.1, 0.1, 0.1, 0.1]
 P_tie = np.array(
     [
-        [0, 4, 0, 0, 0],
-        [4, 0, 2, 0, 3],
-        [0, 2, 0, 2, 0],
-        [0, 0, 2, 0, 3],
-        [0, 3, 0, 3, 0],
+        [0, 4, 0, 0],
+        [4, 0, 2, 0],
+        [0, 2, 0, 2],
+        [0, 0, 2, 0],
     ]
 )  # entri (i,j) represent P val between areas i and j
 ts = 1  # time-step
@@ -237,7 +236,8 @@ pars_init = [
         "f_x": 0 * np.ones((nx_l, 1)),
         "f_u": 0 * np.ones((nu_l, 1)),
         "Q_x": np.diag((500, 0.1, 0.1, 10)),
-        "Q_u": 10 * np.ones((1, 1)),
+        #"Q_x": np.diag((0, 0, 0, 0)),
+        "Q_u": 10 * np.ones((1,)),
     }
     for i in range(n)
 ]
