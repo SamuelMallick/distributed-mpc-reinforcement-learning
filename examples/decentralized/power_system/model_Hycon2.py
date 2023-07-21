@@ -21,7 +21,7 @@ from mpcrl.core.schedulers import ExponentialScheduler
 from scipy.linalg import block_diag
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
 from rldmpc.core.admm import g_map
-from rldmpc.utils.discretisation import zero_order_hold, forward_euler
+from rldmpc.utils.discretisation import zero_order_hold, forward_euler, tustin
 
 np.random.seed(1)
 
@@ -130,7 +130,7 @@ def dynamics_from_parameters(
     # A_d, B_d = forward_euler(A, B, ts)
     # L_d = ts * L
     B_comb = np.hstack((B, L))
-    A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
+    A_d, B_d_comb = tustin(A, B_comb, ts)
     B_d = B_d_comb[:, :n]
     L_d = B_d_comb[:, n:]
 
@@ -294,7 +294,7 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
     L = np.array([[0], [-1 / (2 * H)], [0], [0]])
 
     B_comb = cs.horzcat(B, L)
-    A_d, B_d_comb = forward_euler(A, B_comb, ts)
+    A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
     B_d = B_d_comb[:, :nu_l]
     L_d = B_d_comb[:, nu_l:]
 

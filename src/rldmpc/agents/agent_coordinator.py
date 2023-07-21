@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
     """Coordinator to handle the communication and learning of a multi-agent q-learning system."""
 
-    iters = 200  # number of iters in ADMM procedure
+    iters = 50  # number of iters in ADMM procedure
 
     def __init__(
         self,
@@ -66,6 +66,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self.P = P
         self.rho = rho
 
+
         super().__init__(  # use itself as a learning agent for error checking
             mpc_cent,
             update_strategy,
@@ -92,8 +93,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     new_exp = deepcopy(exploration)
                     new_exp.reset(i)    # reseting with new seed
                     exploration_list[i] = StepWiseExploration(new_exp, self.iters)  # step wise to account for ADMM iters
-
-            self.agents: list[LstdQLearningAgent] = []
+                self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
                     RecordUpdates(

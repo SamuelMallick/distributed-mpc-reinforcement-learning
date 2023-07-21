@@ -17,7 +17,7 @@ from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgen
 from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
-from mpcrl.core.exploration import EpsilonGreedyExploration
+from mpcrl.core.exploration import EpsilonGreedyExploration, StepWiseExploration
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
@@ -106,7 +106,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     nx = n * nx_l  # number of states
     nu = n * nu_l  # number of inputs
 
-    w = np.tile([[1e2, 1e2]], (1, n))  # agent penalty weight for bound violations
+    w = np.tile([[1.2e2, 1.2e2]], (1, n))  # agent penalty weight for bound violations
     x_bnd = np.tile([[0, -1], [1, 1]], (1, n))
     a_bnd = np.tile([[-1], [1]], (1, n))
     e_bnd = np.tile([[-1e-1], [0]], (1, n))  # uniform noise bounds
@@ -173,9 +173,10 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         noise = self.np_random.uniform(*self.e_bnd).reshape(-1, 1)
         x_new[np.arange(0, self.nx, self.nx_l)] += noise
 
-        self.x = x_new
         r = self.get_stage_cost(self.x, action)
         r_dist = self.get_dist_stage_cost(self.x, action)
+        self.x = x_new
+        
         return x_new, r, False, False, {"r_dist": r_dist}
 
 
@@ -530,7 +531,7 @@ agent = Log(  # type: ignore[var-annotated]
             n=LtiSystem.n,
             G=G,
             P=P,
-            centralised_flag=CENTRALISED,
+            centralised_flag=False,
             centralised_debug=False,
             mpc_cent=mpc,
             learnable_parameters=learnable_pars,
@@ -539,15 +540,17 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=2,
-            learning_rate=ExponentialScheduler(4e-5, factor=0.9995),  # 4e-5,
+            learning_rate=ExponentialScheduler(4e-5, factor=0.9997),  # 4e-5,
             hessian_type="none",
             record_td_errors=True,
-            exploration=EpsilonGreedyExploration(  # None,  # None,  # None,
-                epsilon=ExponentialScheduler(0.5, factor=0.99),
-                strength=0.1 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+            exploration=#None, 
+            EpsilonGreedyExploration(
+                epsilon=ExponentialScheduler(0.7, factor=0.99),
+                strength=0.3 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),
-            experience=ExperienceReplay(
+            experience=#None,
+            ExperienceReplay(
                 maxlen=100, sample_size=15, include_latest=10, seed=1
             ),  # None,
         )
