@@ -22,7 +22,7 @@ update_rate = 2
 limit = 10000
 
 with open(
-    "data/us_2_lr_4en5_fac_0_9995_exp_0.5_fac_0_99_stren_0_1_exprep_100_15_10/centralised.pkl",
+    "data/C_False24051117355086.pkl",
     "rb",
 ) as file:
     X = pickle.load(file)

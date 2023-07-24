@@ -26,7 +26,7 @@ from rldmpc.core.admm import g_map
 import pickle
 import datetime
 
-CENTRALISED = False
+CENTRALISED = True
 
 Adj = np.array(
     [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
@@ -531,7 +531,7 @@ agent = Log(  # type: ignore[var-annotated]
             n=LtiSystem.n,
             G=G,
             P=P,
-            centralised_flag=False,
+            centralised_flag=CENTRALISED,
             centralised_debug=False,
             mpc_cent=mpc,
             learnable_parameters=learnable_pars,
