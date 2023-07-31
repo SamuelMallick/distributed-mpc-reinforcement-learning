@@ -1,6 +1,7 @@
 from typing import Tuple
 import numpy as np
 from scipy.signal import cont2discrete
+from scipy.linalg import expm
 import casadi as cs
 
 
@@ -16,12 +17,16 @@ def forward_euler(
 def zero_order_hold(
     A: np.ndarray, B: np.ndarray, ts: float
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Discretise the continuous time system x_dot = Ax + Bu using ZOH"""
-    C = np.eye(A.shape[0])
-    D = np.array([[0]])
-    Ad = cs.expm(A)
-    Bd = cs.inv(A)@(Ad - np.eye(A.shape[0]))@B
+    n = A.shape[0]
+    I = np.eye(n)
+    D = expm(ts * np.vstack((np.hstack([A, I]), np.zeros((n, 2 * n)))))
+    Ad = D[:n, :n]
+    Id = D[:n, n:]
+    Bd = Id.dot(B)
     return Ad, Bd
+
+    return Ad, Bd
+
 
 def tustin(
     A: np.ndarray, B: np.ndarray, ts: float
