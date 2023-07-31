@@ -63,6 +63,33 @@ P = np.eye(n) - eps * L  # consensus matrix
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Discrete time network of four power system areas connected with tie lines."""
 
+    A, B, L = get_cent_model(discrete=False)  # Get continuous centralised model
+
+    # stage cost params
+    Q_x_l = np.diag((500, 0.01, 0.01, 10))
+    Q_x = block_diag(*([Q_x_l] * n))
+    Q_u_l = 10
+    Q_u = block_diag(*([Q_u_l] * n))
+
+    load = np.array([[0], [0], [0], [0]])  # load ref points
+    x_o = np.zeros((n * nx_l, 1))
+    u_o = np.zeros((n * nu_l, 1))
+
+    load_noise_bnd = 0e-1  # uniform noise bound on load noise
+
+    phi_weight = 0  # weight given to power transfer term in stage cost
+    P_tie_list = get_P_tie_init()  # true power transfer coefficients
+
+    def __init__(self) -> None:
+        super().__init__()
+        x = cs.SX.sym("x", self.A.shape[1])
+        u = cs.SX.sym("u", self.B.shape[1])
+        l = cs.SX.sym("l", self.L.shape[1])
+        p = cs.vertcat(u, l)
+        x_new = self.A @ x + self.B @ u + self.L @ l
+        ode = {"x": x, "p": p, "ode": x_new}
+        self.integrator = cs.integrator("env_integrator", "cvodes", ode, 0, ts, {"abstol": 1e-8, "reltol": 1e-8},)
+
     def set_points(self, load_val):
         # set points for the system
         x_o_val = np.array(
@@ -89,23 +116,6 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         ).T
         u_o_val = load_val.copy()
         return x_o_val, u_o_val
-
-    A, B, L = get_cent_model()  # Get centralised model
-
-    # stage cost params
-    Q_x_l = np.diag((500, 0.01, 0.01, 10))
-    Q_x = block_diag(*([Q_x_l] * n))
-    Q_u_l = 10
-    Q_u = block_diag(*([Q_u_l] * n))
-
-    load = np.array([[0], [0], [0], [0]])  # load ref points
-    x_o = np.zeros((n * nx_l, 1))
-    u_o = np.zeros((n * nu_l, 1))
-
-    load_noise_bnd = 1e-1  # uniform noise bound on load noise
-
-    phi_weight = 0  # weight given to power transfer term in stage cost
-    P_tie_list = get_P_tie_init()  # true power transfer coefficients
 
     def reset(
         self,
@@ -148,13 +158,10 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         self, action: cs.DM
     ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
         """Steps the system."""
-        action = action.full()
-
+        r = float(self.get_stage_cost(self.x, action))
         load_noise = np.random.uniform(-self.load_noise_bnd, self.load_noise_bnd, (n, 1))
-
-        x_new = self.A @ self.x + self.B @ action + self.L @ (self.load + load_noise)
-
-        r = self.get_stage_cost(self.x, action)
+        l = self.load + load_noise
+        x_new = self.integrator(x0=self.x, p=cs.vertcat(action, l))["xf"]
         self.x = x_new
         return x_new, r, False, False, {}
 
