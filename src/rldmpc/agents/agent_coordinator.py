@@ -91,8 +91,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if exploration is not None:
                 for i in range(n):
                     new_exp = deepcopy(exploration)
-                    #new_exp.reset(i)    # reseting with new seed
-                    exploration_list[i] = StepWiseExploration(new_exp, self.iters)  # step wise to account for ADMM iters
+                    new_exp.reset(i)    # reseting with new seed
+                    exploration_list[i] = StepWiseExploration(new_exp, self.iters, stepwise_decay=False)  # step wise to account for ADMM iters
                 self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists

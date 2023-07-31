@@ -102,7 +102,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     x_o = np.zeros((n * nx_l, 1))
     u_o = np.zeros((n * nu_l, 1))
 
-    load_noise_bnd = 0 #1e-1  # uniform noise bound on load noise
+    load_noise_bnd = 1e-1  # uniform noise bound on load noise
 
     phi_weight = 0  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients
@@ -150,7 +150,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         """Steps the system."""
         action = action.full()
 
-        load_noise = np.random.uniform(0, self.load_noise_bnd, (n, 1))
+        load_noise = np.random.uniform(-self.load_noise_bnd, self.load_noise_bnd, (n, 1))
 
         x_new = self.A @ self.x + self.B @ action + self.L @ (self.load + load_noise)
 

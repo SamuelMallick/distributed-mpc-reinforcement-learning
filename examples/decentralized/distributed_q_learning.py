@@ -523,7 +523,7 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(10e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -540,13 +540,13 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=2,
-            learning_rate=ExponentialScheduler(4e-5, factor=0.9997),  # 4e-5,
+            learning_rate=ExponentialScheduler(6e-5, factor=0.9996),  # 4e-5,
             hessian_type="none",
             record_td_errors=True,
             exploration=#None, 
             EpsilonGreedyExploration(
                 epsilon=ExponentialScheduler(0.7, factor=0.99),
-                strength=0.3 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
+                strength=0.5 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),
             experience=#None,

@@ -294,7 +294,7 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
     L = np.array([[0], [-1 / (2 * H)], [0], [0]])
 
     B_comb = cs.horzcat(B, L)
-    A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
+    A_d, B_d_comb = forward_euler(A, B_comb, ts)
     B_d = B_d_comb[:, :nu_l]
     L_d = B_d_comb[:, nu_l:]
 
