@@ -52,8 +52,6 @@ P_tie = np.array(
 )  # entri (i,j) represent P val between areas i and j
 ts = 1  # time-step
 
-# construct real dynamics - subscript l is for local components
-
 
 def dynamics_from_parameters(
     H: list[float],
@@ -128,13 +126,7 @@ def dynamics_from_parameters(
     )
     if not discrete:
         return A, B, L
-    # A_d, B_d = forward_euler(A, B, ts)
-    # L_d = ts * L
-    B_comb = np.hstack((B, L))
-    A_d, B_d_comb = tustin(A, B_comb, ts)
-    B_d = B_d_comb[:, :n]
-    L_d = B_d_comb[:, n:]
-    return A_d, B_d, L_d
+    raise NotImplementedError("TODO")
 
 
 def get_cent_model(discrete: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -210,14 +202,14 @@ def learnable_dynamics_from_parameters(
 
     # disrctised
     B_comb = cs.horzcat(B, L)
-    A_d, B_d_comb = forward_euler(A, B_comb, ts)
+    # A_d, B_d_comb = forward_euler(A, B_comb, ts)
+    A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
     B_d = B_d_comb[:, :n]
     L_d = B_d_comb[:, n:]
-
     return A_d, B_d, L_d
 
 
-def get_model_dims() -> Tuple[int, int, int]:
+def get_model_dims() -> Tuple[int, int, int, np.ndarray, float]:
     return n, nx_l, nu_l, Adj, ts
 
 
@@ -236,7 +228,7 @@ pars_init = [
         "f_x": 0 * np.ones((nx_l, 1)),
         "f_u": 0 * np.ones((nu_l, 1)),
         "Q_x": np.diag((500, 0.1, 0.1, 10)),
-        #"Q_x": np.diag((0, 0, 0, 0)),
+        # "Q_x": np.diag((0, 0, 0, 0)),
         "Q_u": 10 * np.ones((1,)),
     }
     for i in range(n)
@@ -277,7 +269,7 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
 
 
 def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
-    A = np.array(
+    A = cs.blockcat(
         [
             [0, 1, 0, 0],
             [
@@ -290,19 +282,13 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
             [0, -1 / (R * T_g), 0, -1 / T_g],
         ]
     )
-    B = np.array([[0], [0], [0], [1 / T_g]])
-    L = np.array([[0], [-1 / (2 * H)], [0], [0]])
-
-    B_comb = cs.horzcat(B, L)
-    A_d, B_d_comb = forward_euler(A, B_comb, ts)
-    B_d = B_d_comb[:, :nu_l]
-    L_d = B_d_comb[:, nu_l:]
+    B = cs.blockcat([[0], [0], [0], [1 / T_g]])
+    L = cs.blockcat([[0], [-1 / (2 * H)], [0], [0]])
 
     A_c_list = []
     for i in range(len(P_tie_list)):
         A_c_list.append(
-            ts
-            * np.array(  # multiplie by ts for forward euler discretisation
+            cs.blockcat(  # multiplie by ts for forward euler discretisation
                 [
                     [0, 0, 0, 0],
                     [P_tie_list[i] / (2 * H), 0, 0, 0],
@@ -312,4 +298,14 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
             )
         )
 
-    return A_d, B_d, L_d, A_c_list
+    B_comb = cs.horzcat(B, L, *A_c_list)
+    A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
+    B_d = B_d_comb[:, :nu_l]
+    L_d = B_d_comb[:, nu_l:]
+    A_d_c_list = []
+    for i in range(len(P_tie_list)):
+        A_d_c_list.append(
+            B_d_comb[:, 2*nu_l+i*nx_l:2*nu_l+(i+1)*nx_l]
+        )
+
+    return A_d, B_d, L_d, A_d_c_list

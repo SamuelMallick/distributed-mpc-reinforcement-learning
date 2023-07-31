@@ -176,7 +176,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         r = self.get_stage_cost(self.x, action)
         r_dist = self.get_dist_stage_cost(self.x, action)
         self.x = x_new
-        
+
         return x_new, r, False, False, {"r_dist": r_dist}
 
 
@@ -543,14 +543,12 @@ agent = Log(  # type: ignore[var-annotated]
             learning_rate=ExponentialScheduler(6e-5, factor=0.9996),  # 4e-5,
             hessian_type="none",
             record_td_errors=True,
-            exploration=#None, 
-            EpsilonGreedyExploration(
+            exploration=EpsilonGreedyExploration(  # None,
                 epsilon=ExponentialScheduler(0.7, factor=0.99),
                 strength=0.5 * (LtiSystem.a_bnd[1, 0] - LtiSystem.a_bnd[0, 0]),
                 seed=1,
             ),
-            experience=#None,
-            ExperienceReplay(
+            experience=ExperienceReplay(  # None,
                 maxlen=100, sample_size=15, include_latest=10, seed=1
             ),  # None,
         )

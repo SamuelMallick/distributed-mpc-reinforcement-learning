@@ -3,6 +3,7 @@ import cvxpy as cp
 
 np.random.seed(1)
 
+
 def g_map(Adj: np.ndarray):
     """Construct the ADMM mapping from local to global variables from an adjacency matrix."""
     n = Adj.shape[0]  # number of agents
@@ -155,9 +156,9 @@ if __name__ == "__main__":
     cost_list: list[cp.Expression] = []
     cost_glob = 0  # global cost
     for i in range(n):
-        #Q = np.random.rand(nx_l, nx_l)
-        #Q = Q @ Q.T
-        Q = np.array([[1+i, 0.1], [0.1, 2+i]])
+        # Q = np.random.rand(nx_l, nx_l)
+        # Q = Q @ Q.T
+        Q = np.array([[1 + i, 0.1], [0.1, 2 + i]])
         f = 2 * np.random.rand(nx_l, 1) - 1
         local_var = x_list[i][
             :, G[i].index(i)

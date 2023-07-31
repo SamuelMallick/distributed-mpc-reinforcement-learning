@@ -41,21 +41,24 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = True
+CENTRALISED = False
+LEARN = False
 
 n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
 u_lim = 0.5
 theta_lim = 0.1
 w = 200 * np.ones((n, 1))  # penalty on state viols
-w_l = 200   # local penalty on state viols
+w_l = 200  # local penalty on state viols
 b_scaling = 0.1  # scale the learnable model offset to prevent instability
 
-prediction_length = 15   # length of prediction horizon
+prediction_length = 5  # length of prediction horizon
 
 # distributed stuff
 G = g_map(Adj)
 eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
-D_in = np.array([[1, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]])  # Hard coded D_in matrix from Adj
+D_in = np.array(
+    [[1, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]
+)  # Hard coded D_in matrix from Adj
 L = D_in - Adj  # graph laplacian
 P = np.eye(n) - eps * L  # consensus matrix
 
@@ -77,7 +80,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
     load_noise_bnd = 0e-1  # uniform noise bound on load noise
 
-    phi_weight = 0  # weight given to power transfer term in stage cost
+    phi_weight = 0.5  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients
 
     def __init__(self) -> None:
@@ -88,7 +91,14 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         p = cs.vertcat(u, l)
         x_new = self.A @ x + self.B @ u + self.L @ l
         ode = {"x": x, "p": p, "ode": x_new}
-        self.integrator = cs.integrator("env_integrator", "cvodes", ode, 0, ts, {"abstol": 1e-8, "reltol": 1e-8},)
+        self.integrator = cs.integrator(
+            "env_integrator",
+            "cvodes",
+            ode,
+            0,
+            ts,
+            {"abstol": 1e-8, "reltol": 1e-8},
+        )
 
     def set_points(self, load_val):
         # set points for the system
@@ -127,8 +137,8 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         self.x = np.zeros((n * nx_l, 1))
         # self.load = np.random.uniform(-0.15, 0.15, (n, 1))
         self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
-        #self.load = np.array([[0, 0.2, 0.3, -0.1]]).T
-        #self.load = np.zeros((n, 1))
+        # self.load = np.array([[0, 0.2, 0.3, -0.1]]).T
+        # self.load = np.zeros((n, 1))
         self.x_o, self.u_o = self.set_points(self.load)
         super().reset(seed=seed, options=options)
         return self.x, {}
@@ -159,7 +169,9 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
         """Steps the system."""
         r = float(self.get_stage_cost(self.x, action))
-        load_noise = np.random.uniform(-self.load_noise_bnd, self.load_noise_bnd, (n, 1))
+        load_noise = np.random.uniform(
+            -self.load_noise_bnd, self.load_noise_bnd, (n, 1)
+        )
         l = self.load + load_noise
         x_new = self.integrator(x0=self.x, p=cs.vertcat(action, l))["xf"]
         self.x = x_new
@@ -307,11 +319,10 @@ class MPCAdmm(Mpc[cs.SX]):
                     (x[:, k] - x_o).T @ Q_x @ (x[:, k] - x_o)
                     + (u[:, k] - u_o).T @ Q_u @ (u[:, k] - u_o)
                     + w_l * s[:, [k]]
-                ) for k in range(N)
+                )
+                for k in range(N)
             )
-            + sum(
-                (y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N)
-            )
+            + sum((y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N))
             + sum(
                 ((self.rho / 2) * cs.norm_2(x_cat[:, [k]] - z[:, [k]]) ** 2)
                 for k in range(N)
@@ -354,11 +365,11 @@ class LinearMpc(Mpc[cs.SX]):
 
     # define which params are learnable
     to_learn = []
-    #to_learn = [f"H_{i}" for i in range(n)]
-    #to_learn = to_learn + [f"R_{i}" for i in range(n)]
-    #to_learn = to_learn + [f"D_{i}" for i in range(n)]
-    #to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
-    #to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
+    # to_learn = [f"H_{i}" for i in range(n)]
+    # to_learn = to_learn + [f"R_{i}" for i in range(n)]
+    # to_learn = to_learn + [f"D_{i}" for i in range(n)]
+    # to_learn = to_learn + [f"T_t_{i}" for i in range(n)]
+    # to_learn = to_learn + [f"T_g_{i}" for i in range(n)]
     to_learn = to_learn + [f"theta_lb_{i}" for i in range(n)]
     to_learn = to_learn + [f"theta_ub_{i}" for i in range(n)]
     to_learn = to_learn + [f"V0_{i}" for i in range(n)]
@@ -468,7 +479,7 @@ class LinearMpc(Mpc[cs.SX]):
 
         # trivial terminal constraint
 
-        #self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
+        # self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
 
         # dynamics
 
@@ -496,16 +507,16 @@ class LinearMpc(Mpc[cs.SX]):
                 f_x_full.T @ x[:, k]
                 + f_u_full.T @ u[:, k]
                 + (gamma**k)
-               * (
+                * (
                     (x[:, k] - x_o).T @ Q_x_full @ (x[:, k] - x_o)
                     + (u[:, k] - u_o).T @ Q_u_full @ (u[:, k] - u_o)
                     + w.T @ s[:, [k]]
                 )
-               for k in range(N)
+                for k in range(N)
             )
-            + (gamma**N)*(x[:, N] - x_o).T@Q_x_full@(x[:,N] - x_o)
+            + (gamma**N) * (x[:, N] - x_o).T @ Q_x_full @ (x[:, N] - x_o)
         )
-        
+
         # solver
         opts = {
             "expand": True,
@@ -537,7 +548,9 @@ class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
         if not self.centralised_flag:
             for i in range(n):
                 self.agents[i].fixed_parameters["load"] = env.load[i]
-                self.agents[i].fixed_parameters["x_o"] = env.x_o[nx_l*i:nx_l*(i+1)]
+                self.agents[i].fixed_parameters["x_o"] = env.x_o[
+                    nx_l * i : nx_l * (i + 1)
+                ]
                 self.agents[i].fixed_parameters["u_o"] = env.u_o[i]
 
         return super().on_timestep_end(env, episode, timestep)
@@ -550,7 +563,9 @@ class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
         if not self.centralised_flag:
             for i in range(n):
                 self.agents[i].fixed_parameters["load"] = env.load[i]
-                self.agents[i].fixed_parameters["x_o"] = env.x_o[nx_l*i:nx_l*(i+1)]
+                self.agents[i].fixed_parameters["x_o"] = env.x_o[
+                    nx_l * i : nx_l * (i + 1)
+                ]
                 self.agents[i].fixed_parameters["u_o"] = env.u_o[i]
 
         return super().on_episode_start(env, episode)
@@ -565,7 +580,14 @@ fixed_dist_parameters_list: list = []
 
 pars_init_list = get_pars_init_list()
 for i in range(n):
-    mpc_dist_list.append(MPCAdmm(num_neighbours=len(G[i]) - 1, my_index=G[i].index(i), pars_init= pars_init_list[i], P_tie_init=[P_tie_init[i, j] for j in range(n) if Adj[i,j] != 0]))
+    mpc_dist_list.append(
+        MPCAdmm(
+            num_neighbours=len(G[i]) - 1,
+            my_index=G[i].index(i),
+            pars_init=pars_init_list[i],
+            P_tie_init=[P_tie_init[i, j] for j in range(n) if Adj[i, j] != 0],
+        )
+    )
     learnable_dist_parameters_list.append(
         LearnableParametersDict[cs.SX](
             (
@@ -605,17 +627,15 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=ep_len,
-            learning_rate=ExponentialScheduler(5e-6, factor=1), #5e-6
+            learning_rate=ExponentialScheduler(5e-6, factor=1),  # 5e-6
             hessian_type="none",
             record_td_errors=True,
-            exploration= #None,
-            EpsilonGreedyExploration(
-                epsilon=ExponentialScheduler(0.5, factor=0.99), 
-                strength=0.1 * (2*u_lim),
+            exploration=EpsilonGreedyExploration(  # None,
+                epsilon=ExponentialScheduler(0.5, factor=0.99),
+                strength=0.1 * (2 * u_lim),
                 seed=1,
             ),
-            experience=#None,
-            ExperienceReplay(
+            experience=ExperienceReplay(  # None,
                 maxlen=ep_len, sample_size=0.5, seed=1
             ),  # None,
         )
@@ -624,8 +644,11 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 10
-agent.train(env=env, episodes=num_eps, seed=1)
+num_eps = 1
+if LEARN:
+    agent.train(env=env, episodes=num_eps, seed=1)
+else:
+    agent.evaluate(env=env, episodes=num_eps, seed=1)
 
 # extract data
 if len(env.observations) > 0:
@@ -664,8 +687,9 @@ for i in range(n):
     axs[3].plot(X[:, i * (nx_l) + 3])
 axs[4].plot(U)
 
-_, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
-for param in param_list:
-    if len(param.shape) <= 2:  # TODO dont skip plotting Q
-        axs.plot(param.squeeze())
+if LEARN:
+    _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
+    for param in param_list:
+        if len(param.shape) <= 2:  # TODO dont skip plotting Q
+            axs.plot(param.squeeze())
 plt.show()

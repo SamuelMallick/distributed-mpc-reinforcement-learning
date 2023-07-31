@@ -39,9 +39,9 @@ with open(
 
 # plot the results
 _, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)
-#axs[0].plot(X[:limit, np.arange(0, nx, nx_l)])
+# axs[0].plot(X[:limit, np.arange(0, nx, nx_l)])
 axs[0].plot(X[:limit, [2, 4, 0]])
-#axs[1].plot(X[:limit, np.arange(1, nx, nx_l)])
+# axs[1].plot(X[:limit, np.arange(1, nx, nx_l)])
 axs[1].plot(X[:limit, [3, 5, 1]])
 axs[2].plot(U[:limit, [1, 2, 0]])
 for i in range(2):
