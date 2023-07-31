@@ -63,6 +63,7 @@ def dynamics_from_parameters(
     T_g: list[float],
     P_tie: np.ndarray,
     ts: float,
+    discrete: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     A_l = [
         np.array(
@@ -125,16 +126,21 @@ def dynamics_from_parameters(
             np.hstack((np.zeros((n, 1)), np.zeros((n, 1)), np.zeros((n, 1)), L_l[3])),
         )
     )
-
-    # disrctised
+    if not discrete:
+        return A, B, L
     # A_d, B_d = forward_euler(A, B, ts)
     # L_d = ts * L
     B_comb = np.hstack((B, L))
     A_d, B_d_comb = tustin(A, B_comb, ts)
     B_d = B_d_comb[:, :n]
     L_d = B_d_comb[:, n:]
-
     return A_d, B_d, L_d
+
+
+def get_cent_model(discrete: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    return dynamics_from_parameters(
+        H_list, R_list, D_list, T_t_list, T_g_list, P_tie, ts, discrete
+    )
 
 
 def learnable_dynamics_from_parameters(
@@ -209,12 +215,6 @@ def learnable_dynamics_from_parameters(
     L_d = B_d_comb[:, n:]
 
     return A_d, B_d, L_d
-
-
-def get_cent_model() -> Tuple[np.ndarray, np.ndarray]:
-    return dynamics_from_parameters(
-        H_list, R_list, D_list, T_t_list, T_g_list, P_tie, ts
-    )
 
 
 def get_model_dims() -> Tuple[int, int, int]:
