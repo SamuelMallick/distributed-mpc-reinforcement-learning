@@ -218,7 +218,7 @@ def learnable_dynamics_from_parameters(
 
 
 def get_model_dims() -> Tuple[int, int, int]:
-    return n, nx_l, nu_l, Adj
+    return n, nx_l, nu_l, Adj, ts
 
 
 # initial guesses for each learnable parameter for each agent

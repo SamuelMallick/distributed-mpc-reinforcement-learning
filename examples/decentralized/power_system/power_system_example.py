@@ -43,7 +43,7 @@ np.random.seed(1)
 
 CENTRALISED = True
 
-n, nx_l, nu_l, Adj = get_model_dims()  # Adj is adjacency matrix
+n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
 u_lim = 0.5
 theta_lim = 0.1
 w = 200 * np.ones((n, 1))  # penalty on state viols
