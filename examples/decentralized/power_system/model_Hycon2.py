@@ -52,6 +52,8 @@ P_tie = np.array(
 )  # entri (i,j) represent P val between areas i and j
 ts = 1  # time-step
 
+def get_P_tie():
+    return P_tie
 
 def dynamics_from_parameters(
     H: list[float],
@@ -240,12 +242,13 @@ def get_pars_init_list() -> list[Dict]:
 
 def get_P_tie_init() -> np.ndarray:
     mean = 0
-    dev = 0
+    dev = 1
+    norm_lim = 2
     P_tie_init = P_tie.copy()
     for i in range(n):
         for j in range(n):
             if P_tie_init[i, j] != 0:
-                P_tie_init[i, j] += np.random.normal(mean, dev)
+                P_tie_init[i, j] += np.random.uniform(-norm_lim, norm_lim)
     return P_tie_init
 
 
@@ -281,11 +284,8 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
             [0, -1 / (R * T_g), 0, -1 / T_g],
         ]
     )
-    print(A.shape)
     B = cs.blockcat([[0], [0], [0], [1 / T_g]])
-    print(B.shape)
     L = cs.blockcat([[0], [-1 / (2 * H)], [0], [0]])
-    print(L.shape)
 
     A_c_list = []
     for i in range(len(P_tie_list)):
@@ -301,10 +301,7 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
         )
 
     B_comb = cs.horzcat(B, L, *A_c_list)
-    print(B_comb.shape)
     A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
-    print(A_d.shape)
-    print(B_d_comb.shape)
     B_d = B_d_comb[:, :nu_l]
     L_d = B_d_comb[:, nu_l:2*nu_l]
     A_d_c_list = []
@@ -312,7 +309,4 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
         A_d_c_list.append(
             B_d_comb[:, 2*nu_l+i*nx_l:2*nu_l+(i+1)*nx_l]
         )
-    print(B_d.shape)
-    print(L_d.shape)
-    print(A_d_c_list[0].shape)
     return A_d, B_d, L_d, A_d_c_list

@@ -16,7 +16,7 @@ def forward_euler(
 
 
 def zero_order_hold(
-    A: np.ndarray, B: np.ndarray, ts: float, N: int = 50
+    A: np.ndarray, B: np.ndarray, ts: float, N: int = 30
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Discretise the continuous time system x_dot = Ax + Bu using ZOH"""
     n = A.shape[0]

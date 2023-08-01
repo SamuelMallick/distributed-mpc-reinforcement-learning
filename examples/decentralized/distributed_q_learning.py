@@ -540,7 +540,7 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=2,
-            learning_rate=ExponentialScheduler(6e-5, factor=0.9996),  # 4e-5,
+            learning_rate=ExponentialScheduler(6e-5, factor=0.9996),
             hessian_type="none",
             record_td_errors=True,
             exploration=EpsilonGreedyExploration(  # None,

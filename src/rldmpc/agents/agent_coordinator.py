@@ -85,6 +85,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         )
 
         if not centralised_flag:  # act as a coordinator of learning agents
+            self._updates_enabled = False   # Turn updates off for the centralised
             # configure copies of exploration with different rndom generators to avoid all agents exploring identicaly
             exploration_list = [None] * n
             if exploration is not None:
@@ -94,7 +95,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     exploration_list[i] = StepWiseExploration(
                         new_exp, self.iters, stepwise_decay=False
                     )  # step wise to account for ADMM iters
-                self.agents: list[LstdQLearningAgent] = []
+            self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
                 self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
                     RecordUpdates(
@@ -148,12 +149,34 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     z_slices[i] += list(np.arange(self.nx_l * j, self.nx_l * (j + 1)))
             self.z_slices = z_slices
 
-    # need to override train method to manually reset all agent MPCs
-    def train(self, env, episodes, seed):
+    # need to override train method to manually reset all agent MPCs and NOT activate updates for centralised
+    def train(self,
+        env: Env[ObsType, ActType],
+        episodes: int,
+        seed = None,
+        raises: bool = True,
+        env_reset_options: Optional[dict[str, Any]] = None):
         if not self.centralised_flag:
             for agent in self.agents:
                 agent.reset(seed)
-        super().train(env, episodes, seed)
+            self._updates_enabled = False
+        else:
+            self._updates_enabled = True
+
+        self._raises = raises
+        returns = np.zeros(episodes, float)
+        self.on_training_start(env)
+        seeds = map(int, np.random.SeedSequence(seed).generate_state(episodes))
+
+        for episode, current_seed in zip(range(episodes), seeds):
+            self.reset(current_seed)
+            state, _ = env.reset(seed=current_seed, options=env_reset_options)
+            self.on_episode_start(env, episode)
+            returns[episode] = self.train_one_episode(env, episode, state, raises)
+            self.on_episode_end(env, episode, returns[episode])
+
+        self.on_training_end(env, returns)
+        return returns
 
     def evaluate(
         self,
@@ -167,7 +190,6 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         if self.centralised_flag:
             return super().evaluate(env, episodes, seed, raises, env_reset_options)
         
-        self._updates_enabled = False
         for agent in self.agents:
             agent.reset(seed)
 
@@ -332,8 +354,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 joint_action = new_joint_action
                 rewards += float(cost)
                 timestep += 1
-                if self.centralised_debug:
-                    self.on_timestep_end(env, episode, timestep)
+
+                self.on_timestep_end(env, episode, timestep)
                 for agent in self.agents:
                     agent.on_timestep_end(env, episode, timestep)
             return rewards
@@ -414,9 +436,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         sum += self.x_temp_list[j][x_slice, :]
                 self.z[self.nx_l * i : self.nx_l * (i + 1), :] = sum / count
 
-            plot_list.append(local_sol_list[2].vals["u"])
+            # plot_list.append(local_sol_list[2].vals["u"])
             # plot_list.append(self.x_temp_list[2] - self.z[self.z_slices[2], :])
-            # plot_list.append(self.x_temp_list[0])
+            plot_list.append(self.x_temp_list[0])
             # plot_list.append(self.z[self.z_slices[0], :])
 
             # y update TODO parallelise
@@ -425,9 +447,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     self.x_temp_list[i] - self.z[self.z_slices[i], :]
                 )
 
-        # plot_list = np.asarray(plot_list)
-        # plt.plot(plot_list[:, :, 0])
-        # plt.show()
+        #plot_list = np.asarray(plot_list)
+        #plt.plot(plot_list[:, :, 0])
+        #plt.show()
 
         return (
             loc_action_list,
