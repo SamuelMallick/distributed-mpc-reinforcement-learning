@@ -26,7 +26,7 @@ from rldmpc.core.admm import g_map
 import pickle
 import datetime
 
-CENTRALISED = True
+CENTRALISED = False
 
 Adj = np.array(
     [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
@@ -523,7 +523,7 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e4)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -560,7 +560,7 @@ agent = Log(  # type: ignore[var-annotated]
 agent.train(env=env, episodes=1, seed=1)
 
 STORE_DATA = True
-PLOT = True
+PLOT = False
 
 # extract data
 if len(env.observations) > 0:

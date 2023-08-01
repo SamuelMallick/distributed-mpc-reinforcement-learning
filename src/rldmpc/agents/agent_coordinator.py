@@ -223,7 +223,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 self.on_mpc_failure(episode, None, solV.status, raises)
 
             joint_action, solV_list, error_flag = self.distributed_state_value(
-                state, episode, raises
+                state, episode, raises, deterministic=False
             )
 
             iter_count = 0
@@ -294,7 +294,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         )
 
                 new_joint_action, solV_list, error_flag = self.distributed_state_value(
-                    new_state, episode, raises
+                    new_state, episode, raises, deterministic=False
                 )  # distributed
                 if error_flag:
                     return rewards

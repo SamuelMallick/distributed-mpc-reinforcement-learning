@@ -41,7 +41,7 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = False
+CENTRALISED = True
 LEARN = False
 
 n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
@@ -78,7 +78,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     x_o = np.zeros((n * nx_l, 1))
     u_o = np.zeros((n * nu_l, 1))
 
-    load_noise_bnd = 0e-1  # uniform noise bound on load noise
+    load_noise_bnd = 1e-1  # uniform noise bound on load noise
 
     phi_weight = 0.5  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients

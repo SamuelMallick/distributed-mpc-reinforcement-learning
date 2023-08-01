@@ -22,7 +22,7 @@ update_rate = 2
 limit = 20000
 
 with open(
-    "data/line_258/distributed_2.pkl",
+    "data/line_416/centralised.pkl",
     "rb",
 ) as file:
     X = pickle.load(file)
@@ -39,11 +39,12 @@ with open(
 
 # plot the results
 _, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)
-# axs[0].plot(X[:limit, np.arange(0, nx, nx_l)])
-axs[0].plot(X[:limit, [2, 4, 0]])
-# axs[1].plot(X[:limit, np.arange(1, nx, nx_l)])
-axs[1].plot(X[:limit, [3, 5, 1]])
-axs[2].plot(U[:limit, [1, 2, 0]])
+axs[0].plot(X[:limit, np.arange(0, nx, nx_l)])
+# axs[0].plot(X[:limit, [2, 4, 0]])
+axs[1].plot(X[:limit, np.arange(1, nx, nx_l)])
+# axs[1].plot(X[:limit, [3, 5, 1]])
+# axs[2].plot(U[:limit, [1, 2, 0]])
+axs[2].plot(U[:limit])
 for i in range(2):
     axs[0].axhline(x_bnd[i][0], color="r", linewidth=2)
     axs[1].axhline(x_bnd[i][1], color="r", linewidth=2)

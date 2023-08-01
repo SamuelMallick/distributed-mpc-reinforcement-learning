@@ -228,7 +228,6 @@ pars_init = [
         "f_x": 0 * np.ones((nx_l, 1)),
         "f_u": 0 * np.ones((nu_l, 1)),
         "Q_x": np.diag((500, 0.1, 0.1, 10)),
-        # "Q_x": np.diag((0, 0, 0, 0)),
         "Q_u": 10 * np.ones((1,)),
     }
     for i in range(n)
@@ -282,13 +281,16 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
             [0, -1 / (R * T_g), 0, -1 / T_g],
         ]
     )
+    print(A.shape)
     B = cs.blockcat([[0], [0], [0], [1 / T_g]])
+    print(B.shape)
     L = cs.blockcat([[0], [-1 / (2 * H)], [0], [0]])
+    print(L.shape)
 
     A_c_list = []
     for i in range(len(P_tie_list)):
         A_c_list.append(
-            cs.blockcat(  # multiplie by ts for forward euler discretisation
+            cs.blockcat( 
                 [
                     [0, 0, 0, 0],
                     [P_tie_list[i] / (2 * H), 0, 0, 0],
@@ -299,13 +301,18 @@ def learnable_dynamics_from_parameters_local(H, R, D, T_t, T_g, P_tie_list, ts):
         )
 
     B_comb = cs.horzcat(B, L, *A_c_list)
+    print(B_comb.shape)
     A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
+    print(A_d.shape)
+    print(B_d_comb.shape)
     B_d = B_d_comb[:, :nu_l]
-    L_d = B_d_comb[:, nu_l:]
+    L_d = B_d_comb[:, nu_l:2*nu_l]
     A_d_c_list = []
     for i in range(len(P_tie_list)):
         A_d_c_list.append(
             B_d_comb[:, 2*nu_l+i*nx_l:2*nu_l+(i+1)*nx_l]
         )
-
+    print(B_d.shape)
+    print(L_d.shape)
+    print(A_d_c_list[0].shape)
     return A_d, B_d, L_d, A_d_c_list
