@@ -34,6 +34,7 @@ from model_Hycon2 import (
     get_learnable_dynamics,
     get_P_tie_init,
     get_learnable_dynamics_local,
+    get_P_tie
 )
 
 import pickle
@@ -41,14 +42,19 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = True
-LEARN = False
+CENTRALISED = False
+LEARN = True
+SCENARIO_1 = True
+SCENARIO_2 = False
+
+STORE_DATA = True
+PLOT = True
 
 n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
-u_lim = 0.5
+u_lim = np.array([[0.2], [0.1], [0.3], [0.1]])
 theta_lim = 0.1
-w = 200 * np.ones((n, 1))  # penalty on state viols
-w_l = 200  # local penalty on state viols
+w = 500 * np.ones((n, 1))  # penalty on state viols
+w_l = 500  # local penalty on state viols
 b_scaling = 0.1  # scale the learnable model offset to prevent instability
 
 prediction_length = 5  # length of prediction horizon
@@ -69,9 +75,10 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     A, B, L = get_cent_model(discrete=False)  # Get continuous centralised model
 
     # stage cost params
+    # Q_x_l = np.diag((0, 1, 0, 0))
     Q_x_l = np.diag((500, 0.01, 0.01, 10))
     Q_x = block_diag(*([Q_x_l] * n))
-    Q_u_l = 10
+    Q_u_l = 0
     Q_u = block_diag(*([Q_u_l] * n))
 
     load = np.array([[0], [0], [0], [0]])  # load ref points
@@ -82,6 +89,8 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
     phi_weight = 0.5  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients
+
+    step_counter = 1
 
     def __init__(self) -> None:
         super().__init__()
@@ -136,10 +145,11 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         """Resets the state of the system."""
         self.x = np.zeros((n * nx_l, 1))
         # self.load = np.random.uniform(-0.15, 0.15, (n, 1))
-        self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
+        #self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
         # self.load = np.array([[0, 0.2, 0.3, -0.1]]).T
-        # self.load = np.zeros((n, 1))
+        self.load = np.zeros((n, 1))
         self.x_o, self.u_o = self.set_points(self.load)
+        self.step_counter = 1
         super().reset(seed=seed, options=options)
         return self.x, {}
 
@@ -151,7 +161,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             (state - self.x_o).T @ self.Q_x @ (state - self.x_o)
             + (action - self.u_o).T @ self.Q_u @ (action - self.u_o)
             + self.phi_weight
-            * (  # power transfer term
+            * ts * (  # power transfer term
                 sum(
                     np.abs(self.P_tie_list[i, j] * (state[i * nx_l] - state[j * nx_l]))
                     for j in range(n)
@@ -169,12 +179,28 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
         """Steps the system."""
         r = float(self.get_stage_cost(self.x, action))
+
+        if SCENARIO_1:  # Change load according t oscenario
+            if self.step_counter == 5:
+                self.load = np.array([[0.15, 0, 0, 0]]).T
+                self.x_o, self.u_o = self.set_points(self.load)
+            elif self.step_counter == 15:
+                self.load = np.array([[0.15, -0.15, 0, 0]]).T
+                self.x_o, self.u_o = self.set_points(self.load)
+            elif self.step_counter == 20:
+                self.load = np.array([[0.15, -0.15, 0.12, 0]]).T
+                self.x_o, self.u_o = self.set_points(self.load)
+            elif self.step_counter == 40:
+                self.load = np.array([[0.15, -0.15, -0.12, 0.28]]).T
+                self.x_o, self.u_o = self.set_points(self.load)
+
         load_noise = np.random.uniform(
             -self.load_noise_bnd, self.load_noise_bnd, (n, 1)
         )
         l = self.load + load_noise
         x_new = self.integrator(x0=self.x, p=cs.vertcat(action, l))["xf"]
         self.x = x_new
+        self.step_counter += 1
         return x_new, r, False, False, {}
 
 
@@ -202,7 +228,7 @@ class MPCAdmm(Mpc[cs.SX]):
     to_learn = to_learn + ["Q_x"]
     to_learn = to_learn + ["Q_u"]
 
-    def __init__(self, num_neighbours, my_index, pars_init, P_tie_init) -> None:
+    def __init__(self, num_neighbours, my_index, pars_init, P_tie_init, u_lim) -> None:
         """Instantiate inner MPC for admm. My index is used to pick out own state from the grouped coupling states. It should be passed in via the mapping G (G[i].index(i))"""
 
         # add coupling to learn
@@ -553,7 +579,8 @@ class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
                 ]
                 self.agents[i].fixed_parameters["u_o"] = env.u_o[i]
 
-        return super().on_timestep_end(env, episode, timestep)
+        else:
+            return super().on_timestep_end(env, episode, timestep)
 
     def on_episode_start(self, env, episode: int) -> None:
         self.fixed_parameters["load"] = env.load
@@ -586,6 +613,7 @@ for i in range(n):
             my_index=G[i].index(i),
             pars_init=pars_init_list[i],
             P_tie_init=[P_tie_init[i, j] for j in range(n) if Adj[i, j] != 0],
+            u_lim=u_lim[i]
         )
     )
     learnable_dist_parameters_list.append(
@@ -608,7 +636,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(50e0)
+ep_len = int(100e0)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
@@ -618,7 +646,7 @@ agent = Log(  # type: ignore[var-annotated]
             G=G,
             P=P,
             centralised_flag=CENTRALISED,
-            centralised_debug=True,
+            centralised_debug=False,
             mpc_cent=mpc,
             learnable_parameters=learnable_pars,
             fixed_parameters=mpc.fixed_pars_init,
@@ -627,16 +655,17 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=mpc.discount_factor,
             update_strategy=ep_len,
-            learning_rate=ExponentialScheduler(5e-6, factor=1),  # 5e-6
+            learning_rate=ExponentialScheduler(1e-6, factor=1),  # 5e-6
             hessian_type="none",
             record_td_errors=True,
-            exploration=EpsilonGreedyExploration(  # None,
-                epsilon=ExponentialScheduler(0.5, factor=0.99),
-                strength=0.1 * (2 * u_lim),
+            exploration=#None,
+            EpsilonGreedyExploration( 
+                epsilon=ExponentialScheduler(0.5, factor=0.8),
+                strength=0.1 * (2 * 0.2),
                 seed=1,
             ),
             experience=ExperienceReplay(  # None,
-                maxlen=ep_len, sample_size=0.5, seed=1
+                maxlen=3*ep_len, sample_size=int(1.5*ep_len), include_latest=ep_len, seed=1
             ),  # None,
         )
     ),
@@ -644,7 +673,7 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 1
+num_eps = 300
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:
@@ -659,37 +688,57 @@ else:
     X = np.squeeze(env.ep_observations)
     U = np.squeeze(env.ep_actions)
     R = np.squeeze(env.ep_rewards)
-TD = np.squeeze(agent.td_errors)
-TD_eps = [sum(np.abs(TD[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
-R_eps = [sum(np.abs(R[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
+TD = np.squeeze(agent.td_errors) if CENTRALISED else agent.agents[0].td_errors
+TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)]))/ep_len for i in range(num_eps)]
+R_eps = [sum((R[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 param_list = []
 param_list = param_list + [
     np.asarray(agent.updates_history[name]) for name in mpc.to_learn
 ]
 time = np.arange(R.size)
-_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-axs[0].plot(TD, "o", markersize=1)
-axs[1].plot(R, "o", markersize=1)
-axs[0].set_ylabel(r"$\tau$")
-axs[1].set_ylabel("$L$")
 
-_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-axs[0].plot(TD_eps, "o", markersize=1)
-axs[1].semilogy(R_eps, "o", markersize=1)
+if STORE_DATA:
+    with open(
+        "data/power_C_"
+        + str(CENTRALISED)
+        + datetime.datetime.now().strftime("%d%H%M%S%f")
+        + str(".pkl"),
+        "wb",
+    ) as file:
+        pickle.dump(X, file)
+        pickle.dump(U, file)
+        pickle.dump(R, file)
+        pickle.dump(TD, file)
+        pickle.dump(param_list, file)
 
-_, axs = plt.subplots(5, 1, constrained_layout=True, sharex=True)
-for i in range(n):
-    axs[0].plot(X[:, i * nx_l])
-    axs[0].axhline(theta_lim, color="r")
-    axs[0].axhline(-theta_lim, color="r")
-    axs[1].plot(X[:, i * (nx_l) + 1])
-    axs[2].plot(X[:, i * (nx_l) + 2])
-    axs[3].plot(X[:, i * (nx_l) + 3])
-axs[4].plot(U)
+if PLOT:
+    _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+    axs[0].plot(TD, "o", markersize=1)
+    axs[1].plot(R, "o", markersize=1)
+    axs[0].set_ylabel(r"$\tau$")
+    axs[1].set_ylabel("$L$")
 
-if LEARN:
-    _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
-    for param in param_list:
-        if len(param.shape) <= 2:  # TODO dont skip plotting Q
-            axs.plot(param.squeeze())
-plt.show()
+    _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+    axs[0].plot(TD_eps, "o", markersize=1)
+    axs[1].semilogy(R_eps, "o", markersize=1)
+
+    _, axs = plt.subplots(6, 1, constrained_layout=True, sharex=True)
+    P_tie = get_P_tie()
+    for i in range(n):
+        axs[0].plot(X[:, i * nx_l])
+        axs[0].axhline(theta_lim, color="r")
+        axs[0].axhline(-theta_lim, color="r")
+        axs[1].plot(X[:, i * (nx_l) + 1])
+        axs[2].plot(X[:, i * (nx_l) + 2])
+        axs[3].plot(X[:, i * (nx_l) + 3])
+        for j in range(n):
+            if P_tie[i, j] != 0:
+                axs[5].plot(P_tie[i, j]*(X[:, i * nx_l] - X[:, j * nx_l]))
+    axs[4].plot(U)
+
+    if LEARN:
+        _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
+        for param in param_list:
+            if len(param.shape) <= 2:  # TODO dont skip plotting Q
+                axs.plot(param.squeeze())
+    plt.show()
