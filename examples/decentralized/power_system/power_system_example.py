@@ -16,7 +16,7 @@ from csnlp import Nlp
 from csnlp.util.math import quad_form
 from csnlp.wrappers import Mpc
 from gymnasium.wrappers import TimeLimit
-from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent
+from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent, Agent
 from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
@@ -40,15 +40,15 @@ from model_Hycon2 import (
 import pickle
 import datetime
 
-np.random.seed(1)
+np.random.seed(2)
 
-CENTRALISED = False
-LEARN = True
+CENTRALISED = True
+LEARN = False
 SCENARIO_1 = True
-SCENARIO_2 = False
+SCENARIO_BASED = False
 
-STORE_DATA = True
-PLOT = False
+STORE_DATA = False
+PLOT = True
 
 n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
 u_lim = np.array([[0.2], [0.1], [0.3], [0.1]])
@@ -68,6 +68,7 @@ D_in = np.array(
 L = D_in - Adj  # graph laplacian
 P = np.eye(n) - eps * L  # consensus matrix
 
+load_noise_bnd = 1e-1  # uniform noise bound on load noise
 
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Discrete time network of four power system areas connected with tie lines."""
@@ -84,8 +85,6 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     load = np.array([[0], [0], [0], [0]])  # load ref points
     x_o = np.zeros((n * nx_l, 1))
     u_o = np.zeros((n * nu_l, 1))
-
-    load_noise_bnd = 1e-1  # uniform noise bound on load noise
 
     phi_weight = 0.5  # weight given to power transfer term in stage cost
     P_tie_list = get_P_tie_init()  # true power transfer coefficients
@@ -195,7 +194,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
                 self.x_o, self.u_o = self.set_points(self.load)
 
         load_noise = np.random.uniform(
-            -self.load_noise_bnd, self.load_noise_bnd, (n, 1)
+            -load_noise_bnd, load_noise_bnd, (n, 1)
         )
         l = self.load + load_noise
         x_new = self.integrator(x0=self.x, p=cs.vertcat(action, l))["xf"]
@@ -563,7 +562,128 @@ class LinearMpc(Mpc[cs.SX]):
         }
         self.init_solver(opts, solver="ipopt")
 
+class ScenarioMpc(Mpc[cs.SX]):
+    """A simple randomised scenario based MPC."""
+    horizon = prediction_length
+    discount_factor = 0.9
 
+    Q_x_l = np.diag((500, 0.01, 0.01, 10))
+    Q_x = block_diag(*([Q_x_l] * n))
+    Q_u_l = 10
+    Q_u = block_diag(*([Q_u_l] * n))
+
+    def __init__(self, num_scenarios) -> None:
+        N = self.horizon
+        gamma = self.discount_factor
+        nlp = Nlp[cs.SX]()
+        super().__init__(nlp, N)
+
+        # action is normal for scenario
+        u, _ = self.action("u", n * nu_l, lb=-u_lim, ub=u_lim)
+
+        # state needs to be done manually as we have one state per scenario
+        x = self.nlp.variable('x', (n*nx_l*num_scenarios, self._prediction_horizon + 1), -np.inf, np.inf)[0]
+        x0 = self.nlp.parameter('x_0', (n*nx_l, 1))
+        self.nlp.constraint('x_0', x[:, 0], "==", cs.repmat(x0, num_scenarios, 1))
+        self._states['x'] = x
+        self._initial_states['x_0'] = x0
+
+        s, _, _ = self.variable(
+                f"s",
+                (n*num_scenarios, N),
+                lb=0,
+            )  # n in first dim as only cnstr on theta
+        
+        A, B, L = get_cent_model(discrete=True)
+
+        load = self.parameter("load", (n, 1))
+        x_o = self.parameter("x_o", (n * nx_l, 1))
+        u_o = self.parameter("u_o", (n * nu_l, 1))
+        disturb = self.parameter("disturb", (n*num_scenarios, 1))
+
+        self.fixed_parameter_dict = {
+        "load": np.array([[0], [0], [0], [0]]),
+        "x_o" : np.zeros((n * nx_l, 1)),
+        "u_o" : np.zeros((n * nu_l, 1)),
+        "disturb" : np.random.uniform(
+            -load_noise_bnd, load_noise_bnd, (n*num_scenarios, 1)
+        )
+        }
+
+        # create dynamics matrices combining all scenarios
+        A_full = block_diag(*[A]*num_scenarios)
+        B_full = np.tile(B, (num_scenarios, 1))
+        load_full = cs.repmat(load, num_scenarios, 1) + disturb
+        L_full = block_diag(*[L]*num_scenarios)
+
+        self.set_dynamics(
+            lambda x, u: A_full @ x + B_full @ u + L_full @ load_full, n_in=2, n_out=1
+        )
+
+        # state constraints # TODO check the indexing here
+        for i in range(num_scenarios):
+            for j in range(n):  # only a constraint on theta
+                for k in range(1, N):
+                    self.constraint(
+                        f"theta_lb_{i}_{j}_{k}",
+                        -theta_lim - s[j + i*n, k],
+                        "<=",
+                        x[j * nx_l + i*n*nx_l, k],
+                    )
+                    self.constraint(
+                        f"theta_ub_{i}_{j}_{k}",
+                        x[j * nx_l + i*n*nx_l, k],
+                        "<=",
+                        theta_lim + s[j + i*n, k],
+                    )
+
+        # create cost matrices combining all scenarios
+        Q_x_full = block_diag(*[self.Q_x]*num_scenarios)
+        Q_u_full = num_scenarios*self.Q_u
+        x_o_full = cs.repmat(x_o, num_scenarios, 1)
+        w_full = np.tile(w, (num_scenarios, 1))
+        self.minimize(
+            + sum(
+                + (gamma**k)
+                * (
+                    (x[:, k] - x_o_full).T @ Q_x_full @ (x[:, k] - x_o_full)
+                    + (u[:, k] - u_o).T @ Q_u_full @ (u[:, k] - u_o)
+                    + w_full.T @ s[:, [k]]
+                )
+                for k in range(N)
+            )
+            + (gamma**N) * (x[:, N] - x_o_full).T @ Q_x_full @ (x[:, N] - x_o_full)
+        )
+
+        # solver
+        opts = {
+            "expand": True,
+            "print_time": False,
+            "bound_consistency": True,
+            "calc_lam_x": True,
+            "calc_lam_p": False,
+            # "jit": True,
+            # "jit_cleanup": True,
+            "ipopt": {
+                # "linear_solver": "ma97",
+                # "linear_system_scaling": "mc19",
+                # "nlp_scaling_method": "equilibration-based",
+                "max_iter": 1000,
+                "sb": "yes",
+                "print_level": 0,
+            },
+        }
+        self.init_solver(opts, solver="ipopt")
+        
+class LoadedAgent(Agent):
+    def on_timestep_end(self, env, episode: int, timestep: int) -> None:
+        self.fixed_parameters['load'] = env.load
+        return super().on_timestep_end(env, episode, timestep)
+    
+    def on_episode_start(self, env, episode: int) -> None:
+        self.fixed_parameters['load'] = env.load
+        return super().on_episode_start(env, episode)
+    
 # override the learning agent to check for new load values each iter
 class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
     def on_timestep_end(self, env, episode: int, timestep: int) -> None:
@@ -579,8 +699,7 @@ class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
                 ]
                 self.agents[i].fixed_parameters["u_o"] = env.u_o[i]
 
-        else:
-            return super().on_timestep_end(env, episode, timestep)
+        return super().on_timestep_end(env, episode, timestep)
 
     def on_episode_start(self, env, episode: int) -> None:
         self.fixed_parameters["load"] = env.load
@@ -673,11 +792,16 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 500
+num_eps = 1
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
+elif SCENARIO_BASED:
+    scen_mpc = ScenarioMpc(1)
+    agent = LoadedAgent(scen_mpc, fixed_parameters=scen_mpc.fixed_parameter_dict)
+    agent.evaluate(env=env, episodes=num_eps, seed=1)
 else:
     agent.evaluate(env=env, episodes=num_eps, seed=1)
+
 
 # extract data
 if len(env.observations) > 0:
@@ -688,33 +812,37 @@ else:
     X = np.squeeze(env.ep_observations)
     U = np.squeeze(env.ep_actions)
     R = np.squeeze(env.ep_rewards)
-TD = np.squeeze(agent.td_errors) if CENTRALISED else agent.agents[0].td_errors
-TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)]))/ep_len for i in range(num_eps)]
+
 R_eps = [sum((R[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 param_dict = {}
-if CENTRALISED:
-    for name in mpc.to_learn:
-        param_dict[name] = np.asarray(agent.updates_history[name])
-else:
-    for i in range(n):
-        for name in mpc_dist_list[i].to_learn:
-            param_dict[name + '_' + str(i)] = np.asarray(agent.agents[i].updates_history[name])
-
 time = np.arange(R.size)
+TD = []
+TD_eps = []
+if LEARN:
+    TD = np.squeeze(agent.td_errors) if CENTRALISED else agent.agents[0].td_errors
+    TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)]))/ep_len for i in range(num_eps)]
+    if CENTRALISED:
+        for name in mpc.to_learn:
+            param_dict[name] = np.asarray(agent.updates_history[name])
+    else:
+        for i in range(n):
+            for name in mpc_dist_list[i].to_learn:
+                param_dict[name + '_' + str(i)] = np.asarray(agent.agents[i].updates_history[name])
 
-if STORE_DATA:
-    with open(
-        "data/power_C_"
-        + str(CENTRALISED)
-        + datetime.datetime.now().strftime("%d%H%M%S%f")
-        + str(".pkl"),
-        "wb",
-    ) as file:
-        pickle.dump(X, file)
-        pickle.dump(U, file)
-        pickle.dump(R, file)
-        pickle.dump(TD, file)
-        pickle.dump(param_dict, file)
+
+    if STORE_DATA:
+        with open(
+            "data/power_C_"
+            + str(CENTRALISED)
+            + datetime.datetime.now().strftime("%d%H%M%S%f")
+            + str(".pkl"),
+            "wb",
+        ) as file:
+            pickle.dump(X, file)
+            pickle.dump(U, file)
+            pickle.dump(R, file)
+            pickle.dump(TD, file)
+            pickle.dump(param_dict, file)
 
 if PLOT:
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)

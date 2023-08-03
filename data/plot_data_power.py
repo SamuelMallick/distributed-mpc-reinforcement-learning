@@ -92,7 +92,8 @@ else:
 # parameters
 _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
 for param in param_list:
-    if len(param.shape) <= 2:  # TODO dont skip plotting Q
-        axs.plot(param.squeeze())
+    pass
+    #if len(param.shape) <= 2:  # TODO dont skip plotting Q
+        #axs.plot(param.squeeze())
 
 plt.show()
