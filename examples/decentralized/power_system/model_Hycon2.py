@@ -128,7 +128,12 @@ def dynamics_from_parameters(
     )
     if not discrete:
         return A, B, L
-    raise NotImplementedError("TODO")
+    else:
+        B_comb = np.hstack((B, L))
+        A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
+        B_d = B_d_comb[:, :n]
+        L_d = B_d_comb[:, n:]
+        return A_d, B_d, L_d
 
 
 def get_cent_model(discrete: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

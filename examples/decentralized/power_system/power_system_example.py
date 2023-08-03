@@ -78,7 +78,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     # Q_x_l = np.diag((0, 1, 0, 0))
     Q_x_l = np.diag((500, 0.01, 0.01, 10))
     Q_x = block_diag(*([Q_x_l] * n))
-    Q_u_l = 0
+    Q_u_l = 10
     Q_u = block_diag(*([Q_u_l] * n))
 
     load = np.array([[0], [0], [0], [0]])  # load ref points
