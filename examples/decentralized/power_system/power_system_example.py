@@ -48,7 +48,7 @@ SCENARIO_1 = True
 SCENARIO_2 = False
 
 STORE_DATA = True
-PLOT = True
+PLOT = False
 
 n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
 u_lim = np.array([[0.2], [0.1], [0.3], [0.1]])
@@ -219,8 +219,8 @@ class MPCAdmm(Mpc[cs.SX]):
     # to_learn = to_learn + ["D"]
     # to_learn = to_learn + ["T_t"]
     # to_learn = to_learn + ["T_g"]
-    to_learn = to_learn + ["theta_lb_"]
-    to_learn = to_learn + ["theta_ub_"]
+    to_learn = to_learn + ["theta_lb"]
+    to_learn = to_learn + ["theta_ub"]
     to_learn = to_learn + ["V0"]
     to_learn = to_learn + ["b"]
     to_learn = to_learn + ["f_x"]
@@ -673,7 +673,7 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 300
+num_eps = 500
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:
@@ -691,10 +691,15 @@ else:
 TD = np.squeeze(agent.td_errors) if CENTRALISED else agent.agents[0].td_errors
 TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)]))/ep_len for i in range(num_eps)]
 R_eps = [sum((R[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
-param_list = []
-param_list = param_list + [
-    np.asarray(agent.updates_history[name]) for name in mpc.to_learn
-]
+param_dict = {}
+if CENTRALISED:
+    for name in mpc.to_learn:
+        param_dict[name] = np.asarray(agent.updates_history[name])
+else:
+    for i in range(n):
+        for name in mpc_dist_list[i].to_learn:
+            param_dict[name + '_' + str(i)] = np.asarray(agent.agents[i].updates_history[name])
+
 time = np.arange(R.size)
 
 if STORE_DATA:
@@ -709,7 +714,7 @@ if STORE_DATA:
         pickle.dump(U, file)
         pickle.dump(R, file)
         pickle.dump(TD, file)
-        pickle.dump(param_list, file)
+        pickle.dump(param_dict, file)
 
 if PLOT:
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
@@ -738,7 +743,8 @@ if PLOT:
 
     if LEARN:
         _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
-        for param in param_list:
-            if len(param.shape) <= 2:  # TODO dont skip plotting Q
-                axs.plot(param.squeeze())
+        for name in param_dict:
+            if len(param_dict[name].shape) <= 2:  # TODO dont skip plotting Q
+                axs.plot(param_dict[name].squeeze())
+
     plt.show()
