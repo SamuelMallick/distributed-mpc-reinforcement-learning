@@ -20,7 +20,7 @@ P_tie = np.array(
     ]
 )
 
-colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
 
 with open(
     "data/power_dist_300.pkl",
@@ -33,7 +33,7 @@ with open(
     param_list = pickle.load(file)
 
 # plot the results
-TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)]))/ep_len for i in range(num_eps)]
+TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)])) / ep_len for i in range(num_eps)]
 R_eps = [sum((R[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
@@ -47,10 +47,10 @@ axs[1].set_xlabel(r"$ep$")
 _, axs = plt.subplots(5, 1, constrained_layout=True, sharex=True)
 for i in range(n):
     for j in range(nx_l):
-        axs[j].plot(X[:ep_len+1, i*nx_l + j], color=colors[i])
+        axs[j].plot(X[: ep_len + 1, i * nx_l + j], color=colors[i])
     axs[4].plot(U[:ep_len, i], color=colors[i])
-    axs[4].axhline(u_lim[i], color=colors[i], linewidth=1, linestyle='--')
-    axs[4].axhline(-u_lim[i], color=colors[i], linewidth=1, linestyle='--')
+    axs[4].axhline(u_lim[i], color=colors[i], linewidth=1, linestyle="--")
+    axs[4].axhline(-u_lim[i], color=colors[i], linewidth=1, linestyle="--")
 
 axs[0].axhline(theta_lim, color="r", linewidth=1)
 axs[0].axhline(-theta_lim, color="r", linewidth=1)
@@ -60,10 +60,10 @@ axs[0].axhline(-theta_lim, color="r", linewidth=1)
 _, axs = plt.subplots(5, 1, constrained_layout=True, sharex=True)
 for i in range(n):
     for j in range(nx_l):
-        axs[j].plot(X[-ep_len-1:, i*nx_l + j], color=colors[i])
+        axs[j].plot(X[-ep_len - 1 :, i * nx_l + j], color=colors[i])
     axs[4].plot(U[-ep_len:, i], color=colors[i])
-    axs[4].axhline(u_lim[i], color=colors[i], linewidth=1, linestyle='--')
-    axs[4].axhline(-u_lim[i], color=colors[i], linewidth=1, linestyle='--')
+    axs[4].axhline(u_lim[i], color=colors[i], linewidth=1, linestyle="--")
+    axs[4].axhline(-u_lim[i], color=colors[i], linewidth=1, linestyle="--")
 
 axs[0].axhline(theta_lim, color="r", linewidth=1)
 axs[0].axhline(-theta_lim, color="r", linewidth=1)
@@ -75,25 +75,55 @@ if True:
         for j in range(n):
             if P_tie[i, j] != 0:
                 # first ep
-                axs[0].plot(P_tie[i, j]*(X[:ep_len+1, i * nx_l] - X[:ep_len+1, j * nx_l]))
+                axs[0].plot(
+                    P_tie[i, j]
+                    * (X[: ep_len + 1, i * nx_l] - X[: ep_len + 1, j * nx_l])
+                )
                 # second ep
-                axs[1].plot(P_tie[i, j]*(X[-ep_len-1:, i * nx_l] - X[-ep_len-1:, j * nx_l]))
+                axs[1].plot(
+                    P_tie[i, j]
+                    * (X[-ep_len - 1 :, i * nx_l] - X[-ep_len - 1 :, j * nx_l])
+                )
 else:
-    axs[0].plot(P_tie[2, 3]*(X[:ep_len+1, 2 * nx_l] - X[:ep_len+1, 3 * nx_l]), color='black')
-    axs[0].plot(P_tie[3, 2]*(X[:ep_len+1, 3 * nx_l] - X[:ep_len+1, 2 * nx_l]), color='black')
-    axs[0].plot(P_tie[2, 3]*(X[-ep_len-1:, 2 * nx_l] - X[-ep_len-1:, 3 * nx_l]), color='blue')
-    axs[0].plot(P_tie[3, 2]*(X[-ep_len-1:, 3 * nx_l] - X[-ep_len-1:, 2 * nx_l]), color='blue')
+    axs[0].plot(
+        P_tie[2, 3] * (X[: ep_len + 1, 2 * nx_l] - X[: ep_len + 1, 3 * nx_l]),
+        color="black",
+    )
+    axs[0].plot(
+        P_tie[3, 2] * (X[: ep_len + 1, 3 * nx_l] - X[: ep_len + 1, 2 * nx_l]),
+        color="black",
+    )
+    axs[0].plot(
+        P_tie[2, 3] * (X[-ep_len - 1 :, 2 * nx_l] - X[-ep_len - 1 :, 3 * nx_l]),
+        color="blue",
+    )
+    axs[0].plot(
+        P_tie[3, 2] * (X[-ep_len - 1 :, 3 * nx_l] - X[-ep_len - 1 :, 2 * nx_l]),
+        color="blue",
+    )
 
-    axs[1].plot(P_tie[1, 2]*(X[:ep_len+1, 1 * nx_l] - X[:ep_len+1, 2 * nx_l]), color='black')
-    axs[1].plot(P_tie[2, 1]*(X[:ep_len+1, 2 * nx_l] - X[:ep_len+1, 1 * nx_l]), color='black')
-    axs[1].plot(P_tie[1, 2]*(X[-ep_len-1:, 1 * nx_l] - X[-ep_len-1:, 2 * nx_l]), color='blue')
-    axs[1].plot(P_tie[2, 1]*(X[-ep_len-1:, 2 * nx_l] - X[-ep_len-1:, 1 * nx_l]), color='blue')
+    axs[1].plot(
+        P_tie[1, 2] * (X[: ep_len + 1, 1 * nx_l] - X[: ep_len + 1, 2 * nx_l]),
+        color="black",
+    )
+    axs[1].plot(
+        P_tie[2, 1] * (X[: ep_len + 1, 2 * nx_l] - X[: ep_len + 1, 1 * nx_l]),
+        color="black",
+    )
+    axs[1].plot(
+        P_tie[1, 2] * (X[-ep_len - 1 :, 1 * nx_l] - X[-ep_len - 1 :, 2 * nx_l]),
+        color="blue",
+    )
+    axs[1].plot(
+        P_tie[2, 1] * (X[-ep_len - 1 :, 2 * nx_l] - X[-ep_len - 1 :, 1 * nx_l]),
+        color="blue",
+    )
 
 # parameters
 _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
 for param in param_list:
     pass
-    #if len(param.shape) <= 2:  # TODO dont skip plotting Q
-        #axs.plot(param.squeeze())
+    # if len(param.shape) <= 2:  # TODO dont skip plotting Q
+    # axs.plot(param.squeeze())
 
 plt.show()

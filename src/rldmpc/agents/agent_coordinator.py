@@ -85,7 +85,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         )
 
         if not centralised_flag:  # act as a coordinator of learning agents
-            self._updates_enabled = False   # Turn updates off for the centralised
+            self._updates_enabled = False  # Turn updates off for the centralised
             # configure copies of exploration with different rndom generators to avoid all agents exploring identicaly
             exploration_list = [None] * n
             if exploration is not None:
@@ -150,12 +150,14 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             self.z_slices = z_slices
 
     # need to override train method to manually reset all agent MPCs and NOT activate updates for centralised
-    def train(self,
+    def train(
+        self,
         env: Env[ObsType, ActType],
         episodes: int,
-        seed = None,
+        seed=None,
         raises: bool = True,
-        env_reset_options: Optional[dict[str, Any]] = None):
+        env_reset_options: Optional[dict[str, Any]] = None,
+    ):
         if not self.centralised_flag:
             for agent in self.agents:
                 agent.reset(seed)
@@ -189,7 +191,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
     ):
         if self.centralised_flag:
             return super().evaluate(env, episodes, seed, raises, env_reset_options)
-        
+
         for agent in self.agents:
             agent.reset(seed)
 
@@ -447,9 +449,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     self.x_temp_list[i] - self.z[self.z_slices[i], :]
                 )
 
-        #plot_list = np.asarray(plot_list)
-        #plt.plot(plot_list[:, :, 0])
-        #plt.show()
+        # plot_list = np.asarray(plot_list)
+        # plt.plot(plot_list[:, :, 0])
+        # plt.show()
 
         return (
             loc_action_list,

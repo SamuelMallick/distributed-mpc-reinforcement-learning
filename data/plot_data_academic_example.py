@@ -63,7 +63,7 @@ axs[1].set_ylabel(r"$L$")
 axs[1].set_xlabel(r"$t$")
 axs[0].set_ylim(-5, 15)
 axs[1].set_ylim(0, 8)
-#axs[1].set_xticks([1e3, 2e3, 3e3, 4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 10e3])
+# axs[1].set_xticks([1e3, 2e3, 3e3, 4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 10e3])
 # axs[1].set_xticklabels([r"$1 \times 10^3$", r"$2\times 10^3$", r"$3\times 10^3$", r"$4\times 10^3$", r"$5\times 10^3$", r"$6\times 10^3$", r"$7\times 10^3$", r"$8\times 10^3$", r"$9\times 10^3$", r"$10\times 10^3$"])
 plt.savefig("data/TD.eps", format="eps")
 # Plot parameters
