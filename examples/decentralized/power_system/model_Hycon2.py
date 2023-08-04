@@ -202,7 +202,7 @@ def get_learnable_dynamics(
 ):
     """Get symbolic A, B and L matrices for the centralised system Ax + Bu + Ld. Always discretised."""
     A_l = [
-        np.array(
+        cs.blockcat(
             [
                 [0, 1, 0, 0],
                 [
@@ -217,14 +217,14 @@ def get_learnable_dynamics(
         )
         for i in range(n)
     ]
-    B_l = [np.array([[0], [0], [0], [1 / T_g_list[i]]]) for i in range(n)]
-    L_l = [np.array([[0], [-1 / (2 * H_list[i])], [0], [0]]) for i in range(n)]
+    B_l = [cs.blockcat([[0], [0], [0], [1 / T_g_list[i]]]) for i in range(n)]
+    L_l = [cs.blockcat([[0], [-1 / (2 * H_list[i])], [0], [0]]) for i in range(n)]
 
     # coupling
 
     A_c = [
         [
-            np.array(
+            cs.blockcat(
                 [
                     [0, 0, 0, 0],
                     [P_tie_list_list[i][j] / (2 * H_list[i]), 0, 0, 0],

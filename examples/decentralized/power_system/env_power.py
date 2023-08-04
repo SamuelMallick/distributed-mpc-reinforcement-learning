@@ -28,6 +28,7 @@ np.random.seed(1)
     load_noise_bnd,
 ) = get_model_details()  # see model_Hycon2 file for definition of each
 
+
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Discrete time network of four power system areas connected with tie lines."""
 
@@ -40,7 +41,9 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     Q_u = block_diag(*([Q_u_l] * n))
 
     load = np.array([[0], [0], [0], [0]])  # load ref points - changed in step function
-    x_o = np.zeros((n * nx_l, 1))   # set points for state and action - set with load changes
+    x_o = np.zeros(
+        (n * nx_l, 1)
+    )  # set points for state and action - set with load changes
     u_o = np.zeros((n * nu_l, 1))
 
     phi_weight = 0.5  # weight given to power transfer term in stage cost

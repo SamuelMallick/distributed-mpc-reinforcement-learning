@@ -15,7 +15,8 @@ from model_Hycon2 import get_P_tie, get_model_details
     load_noise_bnd,
 ) = get_model_details()
 
-def plot_power_system_data(TD, R, TD_eps, R_eps, X, U, param_dict = None):
+
+def plot_power_system_data(TD, R, TD_eps, R_eps, X, U, param_dict=None):
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
     axs[0].plot(TD, "o", markersize=1)
     axs[1].plot(R, "o", markersize=1)

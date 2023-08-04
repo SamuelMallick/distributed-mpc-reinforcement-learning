@@ -60,6 +60,7 @@ D_in = np.array(
 L = D_in - Adj  # graph laplacian
 P = np.eye(n) - eps * L  # consensus matrix
 
+
 class MPCAdmm(Mpc[cs.SX]):
     """MPC for agent inner prob in ADMM."""
 
@@ -413,6 +414,7 @@ class CentralisedMpc(Mpc[cs.SX]):
         }
         self.init_solver(opts, solver="ipopt")
 
+
 # override the learning agent to check for new load values each iter
 class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
     def on_timestep_end(self, env, episode: int, timestep: int) -> None:
@@ -572,4 +574,6 @@ if LEARN:
             pickle.dump(param_dict, file)
 
 if PLOT:
-    plot_power_system_data(TD, R, TD_eps, R_eps, X, U, param_dict=param_dict if LEARN else None)
+    plot_power_system_data(
+        TD, R, TD_eps, R_eps, X, U, param_dict=param_dict if LEARN else None
+    )
