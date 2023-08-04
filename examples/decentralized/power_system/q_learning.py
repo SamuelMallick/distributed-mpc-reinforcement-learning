@@ -1,64 +1,58 @@
-import contextlib
 import logging
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
-
 import casadi as cs
 from csnlp.wrappers.wrapper import Nlp
-import gymnasium as gym
-from gymnasium import Env
 import matplotlib.pyplot as plt
 
-# import networkx as netx
 import numpy as np
-import numpy.typing as npt
 from csnlp import Nlp
-from csnlp.util.math import quad_form
 from csnlp.wrappers import Mpc
 from gymnasium.wrappers import TimeLimit
-from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent, Agent
-from mpcrl.util.control import dlqr
+from mpcrl import LearnableParameter, LearnableParametersDict, Agent
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
-from scipy.linalg import block_diag
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
 from rldmpc.core.admm import g_map
-from rldmpc.utils.discretisation import zero_order_hold, forward_euler
 from model_Hycon2 import (
-    get_cent_model,
     get_model_details,
     get_pars_init_list,
     get_learnable_dynamics,
     get_P_tie_init,
     get_learnable_dynamics_local,
-    get_P_tie
+    get_P_tie,
 )
-
+from env_power import PowerSystem
 import pickle
 import datetime
 
 np.random.seed(1)
 
 CENTRALISED = True
-LEARN = True
-SCENARIO_1 = True
-SCENARIO_BASED = False
+LEARN = False
 
 STORE_DATA = False
 PLOT = True
 
-n, nx_l, nu_l, Adj, ts = get_model_details()  # Adj is adjacency matrix
-u_lim = np.array([[0.2], [0.1], [0.3], [0.1]])
-theta_lim = 0.1
-w = 500 * np.ones((n, 1))  # penalty on state viols
-w_l = 500  # local penalty on state viols
+(
+    n,
+    nx_l,
+    nu_l,
+    Adj,
+    ts,
+    prediction_length,
+    discount_factor,
+    u_lim,
+    theta_lim,
+    w,
+    load_noise_bnd,
+) = get_model_details()  # see model_Hycon2 file for definition of each
+
+w_l = w[0]  # agent penalty on state viols
 b_scaling = 0.1  # scale the learnable model offset to prevent instability
 
-prediction_length = 5  # length of prediction horizon
-
-# distributed stuff
+# matrices for distributed conensus and ADMM
 G = g_map(Adj)
 eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
 D_in = np.array(
@@ -67,148 +61,12 @@ D_in = np.array(
 L = D_in - Adj  # graph laplacian
 P = np.eye(n) - eps * L  # consensus matrix
 
-load_noise_bnd = 1e-1  # uniform noise bound on load noise
-
-class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
-    """Discrete time network of four power system areas connected with tie lines."""
-
-    A, B, L = get_cent_model(discrete=False)  # Get continuous centralised model
-
-    # stage cost params
-    # Q_x_l = np.diag((0, 1, 0, 0))
-    Q_x_l = np.diag((500, 0.01, 0.01, 10))
-    Q_x = block_diag(*([Q_x_l] * n))
-    Q_u_l = 10
-    Q_u = block_diag(*([Q_u_l] * n))
-
-    load = np.array([[0], [0], [0], [0]])  # load ref points
-    x_o = np.zeros((n * nx_l, 1))
-    u_o = np.zeros((n * nu_l, 1))
-
-    phi_weight = 0.5  # weight given to power transfer term in stage cost
-    P_tie_list = get_P_tie_init()  # true power transfer coefficients
-
-    step_counter = 1
-
-    def __init__(self) -> None:
-        super().__init__()
-        x = cs.SX.sym("x", self.A.shape[1])
-        u = cs.SX.sym("u", self.B.shape[1])
-        l = cs.SX.sym("l", self.L.shape[1])
-        p = cs.vertcat(u, l)
-        x_new = self.A @ x + self.B @ u + self.L @ l
-        ode = {"x": x, "p": p, "ode": x_new}
-        self.integrator = cs.integrator(
-            "env_integrator",
-            "cvodes",
-            ode,
-            0,
-            ts,
-            {"abstol": 1e-8, "reltol": 1e-8},
-        )
-
-    def set_points(self, load_val):
-        # set points for the system
-        x_o_val = np.array(
-            [
-                [
-                    0,
-                    0,
-                    load_val[0, :].item(),
-                    load_val[0, :].item(),
-                    0,
-                    0,
-                    load_val[1, :].item(),
-                    load_val[1, :].item(),
-                    0,
-                    0,
-                    load_val[2, :].item(),
-                    load_val[2, :].item(),
-                    0,
-                    0,
-                    load_val[3, :].item(),
-                    load_val[3, :].item(),
-                ]
-            ]
-        ).T
-        u_o_val = load_val.copy()
-        return x_o_val, u_o_val
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
-        """Resets the state of the system."""
-        self.x = np.zeros((n * nx_l, 1))
-        # self.load = np.random.uniform(-0.15, 0.15, (n, 1))
-        #self.load = np.array([[0, 0.6, 0.3, -0.1]]).T
-        # self.load = np.array([[0, 0.2, 0.3, -0.1]]).T
-        self.load = np.zeros((n, 1))
-        self.x_o, self.u_o = self.set_points(self.load)
-        self.step_counter = 1
-        super().reset(seed=seed, options=options)
-        return self.x, {}
-
-    def get_stage_cost(
-        self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
-    ) -> float:
-        """Computes stage cost L(s,a)"""
-        return (
-            (state - self.x_o).T @ self.Q_x @ (state - self.x_o)
-            + (action - self.u_o).T @ self.Q_u @ (action - self.u_o)
-            + self.phi_weight
-            * ts * (  # power transfer term
-                sum(
-                    np.abs(self.P_tie_list[i, j] * (state[i * nx_l] - state[j * nx_l]))
-                    for j in range(n)
-                    for i in range(n)
-                    if Adj[i, j] == 1
-                )
-            )
-            # pulling out thetas via slice [0, 4, 8, 12]
-            + w.T @ np.maximum(0, -np.ones((n, 1)) * theta_lim - state[[0, 4, 8, 12]])
-            + w.T @ np.maximum(0, state[[0, 4, 8, 12]] - np.ones((n, 1)) * theta_lim)
-        )
-
-    def step(
-        self, action: cs.DM
-    ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
-        """Steps the system."""
-        r = float(self.get_stage_cost(self.x, action))
-
-        if SCENARIO_1:  # Change load according t oscenario
-            if self.step_counter == 5:
-                self.load = np.array([[0.15, 0, 0, 0]]).T
-                self.x_o, self.u_o = self.set_points(self.load)
-            elif self.step_counter == 15:
-                self.load = np.array([[0.15, -0.15, 0, 0]]).T
-                self.x_o, self.u_o = self.set_points(self.load)
-            elif self.step_counter == 20:
-                self.load = np.array([[0.15, -0.15, 0.12, 0]]).T
-                self.x_o, self.u_o = self.set_points(self.load)
-            elif self.step_counter == 40:
-                self.load = np.array([[0.15, -0.15, -0.12, 0.28]]).T
-                self.x_o, self.u_o = self.set_points(self.load)
-
-        load_noise = np.random.uniform(
-            -load_noise_bnd, load_noise_bnd, (n, 1)
-        )
-        l = self.load + load_noise
-        x_new = self.integrator(x0=self.x, p=cs.vertcat(action, l))["xf"]
-        self.x = x_new
-        self.step_counter += 1
-        return x_new, r, False, False, {}
-
-
 class MPCAdmm(Mpc[cs.SX]):
     """MPC for agent inner prob in ADMM."""
 
     rho = 50
 
     horizon = prediction_length
-    discount_factor = 0.9
 
     # define learnable parameters
 
@@ -234,7 +92,7 @@ class MPCAdmm(Mpc[cs.SX]):
             self.to_learn = self.to_learn + [f"P_tie_{i}"]
 
         N = self.horizon
-        gamma = self.discount_factor
+        gamma = discount_factor
         nlp = Nlp[cs.SX]()
         super().__init__(nlp, N)
 
@@ -355,7 +213,7 @@ class MPCAdmm(Mpc[cs.SX]):
 
         self.x_dim = (
             x_cat.shape
-        )  # assigning it to class so that the dimension can be retreived later by admm procedure
+        )  # assigning it to class so that the dimension can be retreived later by ADMM procedure
         self.nx_l = nx_l
         self.nu_l = nu_l
 
@@ -381,11 +239,10 @@ class MPCAdmm(Mpc[cs.SX]):
         self.init_solver(opts, solver="ipopt")
 
 
-class LinearMpc(Mpc[cs.SX]):
+class CentralisedMpc(Mpc[cs.SX]):
     """The centralised MPC controller."""
 
     horizon = prediction_length
-    discount_factor = 0.9
 
     # define which params are learnable
     to_learn = []
@@ -436,7 +293,7 @@ class LinearMpc(Mpc[cs.SX]):
 
     def __init__(self) -> None:
         N = self.horizon
-        gamma = self.discount_factor
+        gamma = discount_factor
         nlp = Nlp[cs.SX]()
         super().__init__(nlp, N)
 
@@ -501,10 +358,6 @@ class LinearMpc(Mpc[cs.SX]):
                     theta_lim + theta_ub[i] + s[i, k],
                 )
 
-        # trivial terminal constraint
-
-        # self.constraint("X_f", x[:, [N]] - x_o, "==", 0)
-
         # dynamics
 
         b_full = cs.SX()
@@ -561,129 +414,6 @@ class LinearMpc(Mpc[cs.SX]):
         }
         self.init_solver(opts, solver="ipopt")
 
-class ScenarioMpc(Mpc[cs.SX]):
-    """A simple randomised scenario based MPC."""
-    horizon = prediction_length
-    discount_factor = 0.9
-
-    Q_x_l = np.diag((500, 0.01, 0.01, 10))
-    Q_x = block_diag(*([Q_x_l] * n))
-    Q_u_l = 10
-    Q_u = block_diag(*([Q_u_l] * n))
-
-    def __init__(self, num_scenarios) -> None:
-        N = self.horizon
-        gamma = self.discount_factor
-        nlp = Nlp[cs.SX]()
-        super().__init__(nlp, N)
-
-        # action is normal for scenario
-        u, _ = self.action("u", n * nu_l, lb=-u_lim, ub=u_lim)
-
-        # state needs to be done manually as we have one state per scenario
-        x = self.nlp.variable('x', (n*nx_l*num_scenarios, self._prediction_horizon + 1), -np.inf, np.inf)[0]
-        x0 = self.nlp.parameter('x_0', (n*nx_l, 1))
-        self.nlp.constraint('x_0', x[:, 0], "==", cs.repmat(x0, num_scenarios, 1))
-        self._states['x'] = x
-        self._initial_states['x_0'] = x0
-
-        s, _, _ = self.variable(
-                f"s",
-                (n*num_scenarios, N),
-                lb=0,
-            )  # n in first dim as only cnstr on theta
-        
-        A, B, L = get_cent_model(discrete=True)
-
-        load = self.parameter("load", (n, 1))
-        x_o = self.parameter("x_o", (n * nx_l, 1))
-        u_o = self.parameter("u_o", (n * nu_l, 1))
-        disturb = self.parameter("disturb", (n*num_scenarios, 1))
-
-        self.fixed_parameter_dict = {
-        "load": np.array([[0], [0], [0], [0]]),
-        "x_o" : np.zeros((n * nx_l, 1)),
-        "u_o" : np.zeros((n * nu_l, 1)),
-        "disturb" : np.random.uniform(
-            #-load_noise_bnd, load_noise_bnd, (n*num_scenarios, 1)
-            -0, 0, (n*num_scenarios, 1)
-        )
-        }
-
-        # create dynamics matrices combining all scenarios
-        A_full = block_diag(*[A]*num_scenarios)
-        B_full = np.tile(B, (num_scenarios, 1))
-        load_full = cs.repmat(load, num_scenarios, 1) + disturb
-        L_full = block_diag(*[L]*num_scenarios)
-
-        self.set_dynamics(
-            lambda x, u: A_full @ x + B_full @ u + L_full @ load_full, n_in=2, n_out=1
-        )
-
-        # state constraints # TODO check the indexing here
-        for i in range(num_scenarios):
-            for j in range(n):  # only a constraint on theta
-                for k in range(1, N):
-                    self.constraint(
-                        f"theta_lb_{i}_{j}_{k}",
-                        -theta_lim - s[j + i*n, k],
-                        "<=",
-                        x[j * nx_l + i*n*nx_l, k],
-                    )
-                    self.constraint(
-                        f"theta_ub_{i}_{j}_{k}",
-                        x[j * nx_l + i*n*nx_l, k],
-                        "<=",
-                        theta_lim + s[j + i*n, k],
-                    )
-
-        # create cost matrices combining all scenarios
-        Q_x_full = block_diag(*[self.Q_x]*num_scenarios)
-        Q_u_full = num_scenarios*self.Q_u
-        x_o_full = cs.repmat(x_o, num_scenarios, 1)
-        w_full = np.tile(w, (num_scenarios, 1))
-        self.minimize(
-            + sum(
-                + (gamma**k)
-                * (
-                    (x[:, k] - x_o_full).T @ Q_x_full @ (x[:, k] - x_o_full)
-                    + (u[:, k] - u_o).T @ Q_u_full @ (u[:, k] - u_o)
-                    + w_full.T @ s[:, [k]]
-                )
-                for k in range(N)
-            )
-            + (gamma**N) * (x[:, N] - x_o_full).T @ Q_x_full @ (x[:, N] - x_o_full)
-        )
-
-        # solver
-        opts = {
-            "expand": True,
-            "print_time": False,
-            "bound_consistency": True,
-            "calc_lam_x": True,
-            "calc_lam_p": False,
-            # "jit": True,
-            # "jit_cleanup": True,
-            "ipopt": {
-                # "linear_solver": "ma97",
-                # "linear_system_scaling": "mc19",
-                # "nlp_scaling_method": "equilibration-based",
-                "max_iter": 1000,
-                "sb": "yes",
-                "print_level": 0,
-            },
-        }
-        self.init_solver(opts, solver="ipopt")
-        
-class LoadedAgent(Agent):
-    def on_timestep_end(self, env, episode: int, timestep: int) -> None:
-        self.fixed_parameters['load'] = env.load
-        return super().on_timestep_end(env, episode, timestep)
-    
-    def on_episode_start(self, env, episode: int) -> None:
-        self.fixed_parameters['load'] = env.load
-        return super().on_episode_start(env, episode)
-    
 # override the learning agent to check for new load values each iter
 class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
     def on_timestep_end(self, env, episode: int, timestep: int) -> None:
@@ -717,7 +447,7 @@ class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
         return super().on_episode_start(env, episode)
 
 
-# decentralised
+# create distributed mpc's and parameters
 P_tie_init = get_P_tie_init()
 # distributed mpc and params
 mpc_dist_list: list[Mpc] = []
@@ -732,7 +462,7 @@ for i in range(n):
             my_index=G[i].index(i),
             pars_init=pars_init_list[i],
             P_tie_init=[P_tie_init[i, j] for j in range(n) if Adj[i, j] != 0],
-            u_lim=u_lim[i]
+            u_lim=u_lim[i],
         )
     )
     learnable_dist_parameters_list.append(
@@ -747,15 +477,15 @@ for i in range(n):
     )
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
-# centralised
-mpc = LinearMpc()
+# create distributed mpc's and parameters
+mpc = CentralisedMpc()
 learnable_pars = LearnableParametersDict[cs.SX](
     (
         LearnableParameter(name, val.shape, val, sym=mpc.parameters[name])
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(100e0)
+ep_len = int(100)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
@@ -772,19 +502,21 @@ agent = Log(  # type: ignore[var-annotated]
             mpc_dist_list=mpc_dist_list,
             learnable_dist_parameters_list=learnable_dist_parameters_list,
             fixed_dist_parameters_list=fixed_dist_parameters_list,
-            discount_factor=mpc.discount_factor,
+            discount_factor=discount_factor,
             update_strategy=ep_len,
             learning_rate=ExponentialScheduler(1e-6, factor=1),  # 5e-6
             hessian_type="none",
             record_td_errors=True,
-            exploration=#None,
-            EpsilonGreedyExploration( 
+            exploration=EpsilonGreedyExploration(  # None,
                 epsilon=ExponentialScheduler(0.5, factor=0.8),
                 strength=0.1 * (2 * 0.2),
                 seed=1,
             ),
             experience=ExperienceReplay(  # None,
-                maxlen=3*ep_len, sample_size=int(1.5*ep_len), include_latest=ep_len, seed=1
+                maxlen=3 * ep_len,
+                sample_size=int(1.5 * ep_len),
+                include_latest=ep_len,
+                seed=1,
             ),  # None,
         )
     ),
@@ -795,13 +527,8 @@ agent = Log(  # type: ignore[var-annotated]
 num_eps = 1
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
-elif SCENARIO_BASED:
-    scen_mpc = ScenarioMpc(1)
-    agent = LoadedAgent(scen_mpc, fixed_parameters=scen_mpc.fixed_parameter_dict)
-    agent.evaluate(env=env, episodes=num_eps, seed=1)
 else:
     agent.evaluate(env=env, episodes=num_eps, seed=1)
-
 
 # extract data
 if len(env.observations) > 0:
@@ -820,15 +547,16 @@ TD = []
 TD_eps = []
 if LEARN:
     TD = np.squeeze(agent.td_errors) if CENTRALISED else agent.agents[0].td_errors
-    TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)]))/ep_len for i in range(num_eps)]
+    TD_eps = [sum((TD[ep_len * i : ep_len * (i + 1)])) / ep_len for i in range(num_eps)]
     if CENTRALISED:
         for name in mpc.to_learn:
             param_dict[name] = np.asarray(agent.updates_history[name])
     else:
         for i in range(n):
             for name in mpc_dist_list[i].to_learn:
-                param_dict[name + '_' + str(i)] = np.asarray(agent.agents[i].updates_history[name])
-
+                param_dict[name + "_" + str(i)] = np.asarray(
+                    agent.agents[i].updates_history[name]
+                )
 
     if STORE_DATA:
         with open(
@@ -866,7 +594,7 @@ if PLOT:
         axs[3].plot(X[:, i * (nx_l) + 3])
         for j in range(n):
             if P_tie[i, j] != 0:
-                axs[5].plot(P_tie[i, j]*(X[:, i * nx_l] - X[:, j * nx_l]))
+                axs[5].plot(P_tie[i, j] * (X[:, i * nx_l] - X[:, j * nx_l]))
     axs[4].plot(U)
 
     if LEARN:

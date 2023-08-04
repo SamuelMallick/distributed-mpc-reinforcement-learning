@@ -30,9 +30,17 @@ np.random.seed(1)
 
 # real parameters of the power system - each is a list containing values for each of the four areas
 
-n = 4
-nx_l = 4
-nu_l = 1
+n = 4  # num agents
+nx_l = 4  # agent state dim
+nu_l = 1  # agent control dim
+
+N = 5  # MPC prediction horizon
+discount_factor = 0.9  # discount factor in MPC cost
+
+u_lim = np.array([[0.2], [0.1], [0.3], [0.1]])  # limit on agent control actions
+theta_lim = 0.1  # limit on first state of each agent
+w = 500 * np.ones((n, 1))  # penalty on state viols
+load_noise_bnd = 1e-1  # uniform noise bound on load noise
 
 Adj = np.array([[0, 1, 0, 0], [1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]])
 
@@ -51,12 +59,28 @@ P_tie = np.array(
 )  # entri (i,j) represent P val between areas i and j
 ts = 1  # time-step for discretisation
 
+
 def get_P_tie():
     return P_tie
 
 
-def get_model_details() -> Tuple[int, int, int, np.ndarray, float]:
-    return n, nx_l, nu_l, Adj, ts
+def get_model_details() -> Tuple[
+    int, int, int, np.ndarray, float, int, float, np.ndarray, float, np.ndarray, float
+]:
+    return (
+        n,
+        nx_l,
+        nu_l,
+        Adj,
+        ts,
+        N,
+        discount_factor,
+        u_lim,
+        theta_lim,
+        w,
+        load_noise_bnd,
+    )
+
 
 def get_cent_model(discrete: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Get A, B and L matrices for the centralised system Ax + Bu + Ld. If discrete the continuous dynamics are discretised using ZOH."""
@@ -151,6 +175,7 @@ pars_init = [
     for i in range(n)
 ]
 
+
 def get_pars_init_list() -> list[Dict]:
     """Get initial guesses for learnable parameters (exluding P_tie)."""
     return pars_init
@@ -165,6 +190,7 @@ def get_P_tie_init() -> np.ndarray:
             if P_tie_init[i, j] != 0:
                 P_tie_init[i, j] += np.random.uniform(-norm_lim, norm_lim)
     return P_tie_init
+
 
 def get_learnable_dynamics(
     H_list: list[cs.SX],
@@ -239,6 +265,7 @@ def get_learnable_dynamics(
     L_d = B_d_comb[:, n:]
     return A_d, B_d, L_d
 
+
 def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
     """Get symbolic matrices A_i, B_i, L_i and A_ij for an agent. Always discretised."""
     A = cs.blockcat(
@@ -260,7 +287,7 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
     A_c_list = []
     for i in range(len(P_tie_list)):
         A_c_list.append(
-            cs.blockcat( 
+            cs.blockcat(
                 [
                     [0, 0, 0, 0],
                     [P_tie_list[i] / (2 * H), 0, 0, 0],
@@ -273,11 +300,8 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
     B_comb = cs.horzcat(B, L, *A_c_list)
     A_d, B_d_comb = zero_order_hold(A, B_comb, ts)
     B_d = B_d_comb[:, :nu_l]
-    L_d = B_d_comb[:, nu_l:2*nu_l]
+    L_d = B_d_comb[:, nu_l : 2 * nu_l]
     A_d_c_list = []
     for i in range(len(P_tie_list)):
-        A_d_c_list.append(
-            B_d_comb[:, 2*nu_l+i*nx_l:2*nu_l+(i+1)*nx_l]
-        )
+        A_d_c_list.append(B_d_comb[:, 2 * nu_l + i * nx_l : 2 * nu_l + (i + 1) * nx_l])
     return A_d, B_d, L_d, A_d_c_list
-    
