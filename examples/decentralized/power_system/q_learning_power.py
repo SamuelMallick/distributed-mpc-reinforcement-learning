@@ -28,11 +28,11 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = True
-LEARN = False
+CENTRALISED = False
+LEARN = True
 
-STORE_DATA = False
-PLOT = True
+STORE_DATA = True
+PLOT = False
 
 (
     n,
@@ -525,7 +525,7 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-num_eps = 1
+num_eps = 500
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:

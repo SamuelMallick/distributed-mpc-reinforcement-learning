@@ -51,10 +51,10 @@ T_t_list = [0.65, 0.4, 0.3, 0.6]
 T_g_list = [0.1, 0.1, 0.1, 0.1]
 P_tie = np.array(
     [
-        [0, 4, 0, 0],
-        [4, 0, 2, 0],
-        [0, 2, 0, 2],
-        [0, 0, 2, 0],
+        [0, 4.0, 0, 0],
+        [4.0, 0, 2.0, 0],
+        [0, 2.0, 0, 2.0],
+        [0, 0, 2.0, 0],
     ]
 )  # entri (i,j) represent P val between areas i and j
 ts = 1  # time-step for discretisation
@@ -180,15 +180,15 @@ def get_pars_init_list() -> list[Dict]:
     """Get initial guesses for learnable parameters (exluding P_tie)."""
     return pars_init
 
-
+# create initial guesses as a purturbation of initial P_tie vals
+norm_lim = 2.0
+P_tie_init = P_tie.copy()
+for i in range(n):
+    for j in range(n):
+        if P_tie_init[i, j] != 0:
+            P_tie_init[i, j] += np.random.uniform(-norm_lim, norm_lim)
 def get_P_tie_init() -> np.ndarray:
     """Get initial guesses for learnable P_tie values."""
-    norm_lim = 2
-    P_tie_init = P_tie.copy()
-    for i in range(n):
-        for j in range(n):
-            if P_tie_init[i, j] != 0:
-                P_tie_init[i, j] += np.random.uniform(-norm_lim, norm_lim)
     return P_tie_init
 
 
