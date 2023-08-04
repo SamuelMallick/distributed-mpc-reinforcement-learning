@@ -7,7 +7,6 @@ from csnlp.wrappers.wrapper import Nlp
 import gymnasium as gym
 from gymnasium import Env
 import matplotlib.pyplot as plt
-import pandas as pd
 
 # import networkx as netx
 import numpy as np
@@ -29,7 +28,7 @@ from rldmpc.core.admm import g_map
 from rldmpc.utils.discretisation import zero_order_hold, forward_euler
 from model_Hycon2 import (
     get_cent_model,
-    get_model_dims,
+    get_model_details,
     get_pars_init_list,
     get_learnable_dynamics,
     get_P_tie_init,
@@ -40,17 +39,17 @@ from model_Hycon2 import (
 import pickle
 import datetime
 
-np.random.seed(2)
+np.random.seed(1)
 
 CENTRALISED = True
-LEARN = False
+LEARN = True
 SCENARIO_1 = True
 SCENARIO_BASED = False
 
 STORE_DATA = False
 PLOT = True
 
-n, nx_l, nu_l, Adj, ts = get_model_dims()  # Adj is adjacency matrix
+n, nx_l, nu_l, Adj, ts = get_model_details()  # Adj is adjacency matrix
 u_lim = np.array([[0.2], [0.1], [0.3], [0.1]])
 theta_lim = 0.1
 w = 500 * np.ones((n, 1))  # penalty on state viols
@@ -606,7 +605,8 @@ class ScenarioMpc(Mpc[cs.SX]):
         "x_o" : np.zeros((n * nx_l, 1)),
         "u_o" : np.zeros((n * nu_l, 1)),
         "disturb" : np.random.uniform(
-            -load_noise_bnd, load_noise_bnd, (n*num_scenarios, 1)
+            #-load_noise_bnd, load_noise_bnd, (n*num_scenarios, 1)
+            -0, 0, (n*num_scenarios, 1)
         )
         }
 
