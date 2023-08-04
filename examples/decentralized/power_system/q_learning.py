@@ -1,13 +1,12 @@
 import logging
 import casadi as cs
 from csnlp.wrappers.wrapper import Nlp
-import matplotlib.pyplot as plt
 
 import numpy as np
 from csnlp import Nlp
 from csnlp.wrappers import Mpc
 from gymnasium.wrappers import TimeLimit
-from mpcrl import LearnableParameter, LearnableParametersDict, Agent
+from mpcrl import LearnableParameter, LearnableParametersDict
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 from mpcrl.core.exploration import EpsilonGreedyExploration
@@ -21,8 +20,8 @@ from model_Hycon2 import (
     get_learnable_dynamics,
     get_P_tie_init,
     get_learnable_dynamics_local,
-    get_P_tie,
 )
+from plot_power import plot_power_system_data
 from env_power import PowerSystem
 import pickle
 import datetime
@@ -573,34 +572,4 @@ if LEARN:
             pickle.dump(param_dict, file)
 
 if PLOT:
-    _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-    axs[0].plot(TD, "o", markersize=1)
-    axs[1].plot(R, "o", markersize=1)
-    axs[0].set_ylabel(r"$\tau$")
-    axs[1].set_ylabel("$L$")
-
-    _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-    axs[0].plot(TD_eps, "o", markersize=1)
-    axs[1].semilogy(R_eps, "o", markersize=1)
-
-    _, axs = plt.subplots(6, 1, constrained_layout=True, sharex=True)
-    P_tie = get_P_tie()
-    for i in range(n):
-        axs[0].plot(X[:, i * nx_l])
-        axs[0].axhline(theta_lim, color="r")
-        axs[0].axhline(-theta_lim, color="r")
-        axs[1].plot(X[:, i * (nx_l) + 1])
-        axs[2].plot(X[:, i * (nx_l) + 2])
-        axs[3].plot(X[:, i * (nx_l) + 3])
-        for j in range(n):
-            if P_tie[i, j] != 0:
-                axs[5].plot(P_tie[i, j] * (X[:, i * nx_l] - X[:, j * nx_l]))
-    axs[4].plot(U)
-
-    if LEARN:
-        _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
-        for name in param_dict:
-            if len(param_dict[name].shape) <= 2:  # TODO dont skip plotting Q
-                axs.plot(param_dict[name].squeeze())
-
-    plt.show()
+    plot_power_system_data(TD, R, TD_eps, R_eps, X, U, param_dict=param_dict if LEARN else None)
