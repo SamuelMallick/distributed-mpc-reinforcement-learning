@@ -6,6 +6,8 @@ import casadi as cs
 from scipy.linalg import block_diag
 from mpcrl.wrappers.envs import MonitorEpisodes
 from gymnasium.wrappers import TimeLimit
+import datetime
+import pickle
 
 from model_Hycon2 import get_model_details, get_cent_model
 from plot_power import plot_power_system_data
@@ -14,6 +16,8 @@ from env_power import PowerSystem
 np.random.seed(1)
 
 SCENARIO = True
+PLOT = False
+STORE_DATA = True
 
 (
     n,
@@ -29,7 +33,7 @@ SCENARIO = True
     load_noise_bnd,
 ) = get_model_details()
 
-num_scenarios = 30  # number of scenarios for scenario MPC
+num_scenarios = 50  # number of scenarios for scenario MPC
 
 class ScenarioMpc(Mpc[cs.SX]):
     """A simple randomised scenario based MPC."""
@@ -261,7 +265,7 @@ class LoadedAgent(Agent):
 
 
 env = PowerSystem()
-num_eps = 10
+num_eps = 100
 ep_len = 100
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 
@@ -289,4 +293,20 @@ param_dict = {}
 time = np.arange(R.size)
 TD = []
 TD_eps = []
-plot_power_system_data(TD, R, TD_eps, R_eps, X, U)
+
+if PLOT:
+    plot_power_system_data(TD, R, TD_eps, R_eps, X, U)
+if STORE_DATA:
+        with open(
+            "data/power_eval_S_"
+            + str(SCENARIO)
+            + datetime.datetime.now().strftime("%d%H%M%S%f")
+            + str(".pkl"),
+            "wb",
+        ) as file:
+            pickle.dump(X, file)
+            pickle.dump(U, file)
+            pickle.dump(R, file)
+            pickle.dump(TD, file)
+            pickle.dump(param_dict, file)
+
