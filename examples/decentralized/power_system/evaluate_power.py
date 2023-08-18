@@ -1,3 +1,4 @@
+import logging
 from csnlp import Nlp
 from csnlp.wrappers import Mpc
 from mpcrl import Agent
@@ -6,8 +7,9 @@ import casadi as cs
 from scipy.linalg import block_diag
 from mpcrl.wrappers.envs import MonitorEpisodes
 from gymnasium.wrappers import TimeLimit
-import datetime
+from mpcrl.wrappers.agents import Log
 import pickle
+import datetime
 
 from model_Hycon2 import get_model_details, get_cent_model
 from plot_power import plot_power_system_data
@@ -33,7 +35,7 @@ STORE_DATA = True
     load_noise_bnd,
 ) = get_model_details()
 
-num_scenarios = 50  # number of scenarios for scenario MPC
+num_scenarios = 100  # number of scenarios for scenario MPC
 
 class ScenarioMpc(Mpc[cs.SX]):
     """A simple randomised scenario based MPC."""
@@ -273,7 +275,7 @@ if SCENARIO:
     mpc = ScenarioMpc()
 else:
     mpc = LinearMpc()
-agent = LoadedAgent(mpc, fixed_parameters=mpc.fixed_parameter_dict)
+agent = Log(LoadedAgent(mpc, fixed_parameters=mpc.fixed_parameter_dict), level=logging.DEBUG, log_frequencies={"on_timestep_end": 1})
 returns = agent.evaluate(env=env, episodes=num_eps, seed=1)
 
 print(f"Total returns = {sum(returns)}")
