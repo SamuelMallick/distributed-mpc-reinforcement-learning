@@ -26,7 +26,7 @@ colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
 
 with open(
     "data/power_data/line_40/centralised.pkl",
-    #"data/power_data/scenario/power_scenario_50.pkl",
+    #"data/power_data/scenario/power_scenario_79.pkl",
     #"data/power_data/nominal/centralised.pkl",
     "rb",
 ) as file:
@@ -42,7 +42,7 @@ R_eps = [sum((R[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 
 print(f"Average cost = {sum(R_eps)/len(R_eps)}")
 # manually enter average cost of scenario and nominal MPC
-av_cost_scen = 315
+av_cost_scen = 317.9
 av_cost_nom = 349
 
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)

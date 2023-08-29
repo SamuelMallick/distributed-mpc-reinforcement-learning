@@ -20,6 +20,8 @@ from model_Hycon2 import (
     get_learnable_dynamics,
     get_P_tie_init,
     get_learnable_dynamics_local,
+    get_learned_pars_init_list,
+    get_learned_P_tie_init
 )
 from plot_power import plot_power_system_data
 from env_power import PowerSystem
@@ -28,11 +30,12 @@ import datetime
 
 np.random.seed(1)
 
-CENTRALISED = False
-LEARN = True
+CENTRALISED = True
+LEARN = False
+USE_LEARNED_PARAMS = True
 
 STORE_DATA = True
-PLOT = False
+PLOT = True
 
 (
     n,
@@ -273,7 +276,12 @@ class CentralisedMpc(Mpc[cs.SX]):
     }
 
     # model params
-    pars_init_list = get_pars_init_list()
+    if USE_LEARNED_PARAMS:
+        P_tie_init = get_learned_P_tie_init()
+        pars_init_list = get_learned_pars_init_list()
+    else:
+        P_tie_init = get_P_tie_init()
+        pars_init_list = get_pars_init_list()
     for i in range(n):
         for name, val in pars_init_list[i].items():
             if f"{name}_{i}" in to_learn:
@@ -282,7 +290,6 @@ class CentralisedMpc(Mpc[cs.SX]):
                 fixed_pars_init[f"{name}_{i}"] = val
 
     # coupling params
-    P_tie_init = get_P_tie_init()
     for i in range(n):
         for j in range(n):
             if Adj[i, j] == 1:
@@ -449,13 +456,17 @@ class LoadedLstdQLearningAgentCoordinator(LstdQLearningAgentCoordinator):
 
 
 # create distributed mpc's and parameters
-P_tie_init = get_P_tie_init()
+if USE_LEARNED_PARAMS:
+    P_tie_init = get_learned_P_tie_init()
+    pars_init_list = get_learned_pars_init_list()
+else:
+    P_tie_init = get_P_tie_init()
+    pars_init_list = get_pars_init_list()
 # distributed mpc and params
 mpc_dist_list: list[Mpc] = []
 learnable_dist_parameters_list: list[LearnableParametersDict] = []
 fixed_dist_parameters_list: list = []
 
-pars_init_list = get_pars_init_list()
 for i in range(n):
     mpc_dist_list.append(
         MPCAdmm(
@@ -525,8 +536,8 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-identifier = "dec_0_99"
-num_eps = 500
+identifier = "cent_val"
+num_eps = 100
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:
@@ -560,20 +571,20 @@ if LEARN:
                     agent.agents[i].updates_history[name]
                 )
 
-    if STORE_DATA:
-        with open(
-            "data/power_C_"
-            + str(CENTRALISED)
-            + identifier
-            + datetime.datetime.now().strftime("%d%H%M%S%f")
-            + str(".pkl"),
-            "wb",
-        ) as file:
-            pickle.dump(X, file)
-            pickle.dump(U, file)
-            pickle.dump(R, file)
-            pickle.dump(TD, file)
-            pickle.dump(param_dict, file)
+if STORE_DATA:
+    with open(
+        "data/power_C_"
+        + str(CENTRALISED)
+        + identifier
+        + datetime.datetime.now().strftime("%d%H%M%S%f")
+        + str(".pkl"),
+        "wb",
+    ) as file:
+        pickle.dump(X, file)
+        pickle.dump(U, file)
+        pickle.dump(R, file)
+        pickle.dump(TD, file)
+        pickle.dump(param_dict, file)
 
 if PLOT:
     plot_power_system_data(
