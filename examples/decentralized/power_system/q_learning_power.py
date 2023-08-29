@@ -525,6 +525,7 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
+identifier = "dec_0_99"
 num_eps = 500
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
@@ -563,6 +564,7 @@ if LEARN:
         with open(
             "data/power_C_"
             + str(CENTRALISED)
+            + identifier
             + datetime.datetime.now().strftime("%d%H%M%S%f")
             + str(".pkl"),
             "wb",
