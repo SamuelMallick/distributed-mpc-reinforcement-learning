@@ -1,6 +1,6 @@
 import numpy as np
 
-from rldmpc.mpc.linear_mpc import LinearMPC
+from rldmpc.cvxpy_system.linear_mpc import LinearMPC
 
 
 class Agent:

@@ -1,6 +1,6 @@
 import unittest
 
-from examples.centralized.evaluation import LtiNetwork
+from rldmpc.cvxpy_system.evaluation import LtiNetwork
 
 
 class TestStageCost(unittest.TestCase):

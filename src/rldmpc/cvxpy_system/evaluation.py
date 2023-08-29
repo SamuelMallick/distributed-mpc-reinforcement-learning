@@ -8,8 +8,8 @@ import numpy as np
 import numpy.typing as npt
 from scipy.linalg import block_diag
 
-from rldmpc.agents.agent import Agent
-from rldmpc.mpc.linear_mpc import LinearMPC
+from rldmpc.cvxpy_system.agent import Agent
+from rldmpc.cvxpy_system.linear_mpc import LinearMPC
 
 seed = 0  # random seed
 

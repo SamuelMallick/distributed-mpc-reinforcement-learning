@@ -20,7 +20,7 @@ from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
 from scipy.linalg import block_diag
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
-from rldmpc.core.admm import g_map
+from rldmpc.cvxpy_system.admm import g_map
 from rldmpc.utils.discretisation import zero_order_hold, forward_euler
 
 # real parameters of the power system - each is a list containing value for each of the four areas
