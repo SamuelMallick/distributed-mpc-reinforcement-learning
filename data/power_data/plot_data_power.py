@@ -1,7 +1,7 @@
 import pickle
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import FormatStrFormatter
+from matplotlib.ticker import FormatStrFormatter, ScalarFormatter
 
 plt.rc("text", usetex=True)
 
@@ -52,7 +52,8 @@ axs[1].plot(R_eps, "o", color="black", markersize=0.8)
 #axs[1].axhline(av_cost_nom, color = 'green', linewidth=1)
 axs[0].set_ylabel(r"$\overline{\delta}$")
 axs[1].set_ylabel(r"$\sum L$")
-axs[1].set_xlabel(r"$ep$")
+axs[1].set_xlabel("episode")
+plt.savefig("data/TD.svg", format="svg", dpi=300)
 
 # calculate percentage of constraint violation
 viol_count = 0
@@ -102,6 +103,7 @@ axs[0].axhline(theta_lim, color="r", linewidth=1)
 axs[0].axhline(-theta_lim, color="r", linewidth=1)
 
 # tie line power flows
+legend_entries = []
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
 if True:
     for i in range(n):
@@ -117,69 +119,50 @@ if True:
                     P_tie[i, j]
                     * (X[-ep_len - 1 :, i * nx_l] - X[-ep_len - 1 :, j * nx_l])
                 )
-else:
-    axs[0].plot(
-        P_tie[2, 3] * (X[: ep_len + 1, 2 * nx_l] - X[: ep_len + 1, 3 * nx_l]),
-        color="black",
-    )
-    axs[0].plot(
-        P_tie[3, 2] * (X[: ep_len + 1, 3 * nx_l] - X[: ep_len + 1, 2 * nx_l]),
-        color="black",
-    )
-    axs[0].plot(
-        P_tie[2, 3] * (X[-ep_len - 1 :, 2 * nx_l] - X[-ep_len - 1 :, 3 * nx_l]),
-        color="blue",
-    )
-    axs[0].plot(
-        P_tie[3, 2] * (X[-ep_len - 1 :, 3 * nx_l] - X[-ep_len - 1 :, 2 * nx_l]),
-        color="blue",
-    )
+                legend_entries.append(f"{i+1}{j+1}")
+    axs[0].legend(legend_entries)
 
-    axs[1].plot(
-        P_tie[1, 2] * (X[: ep_len + 1, 1 * nx_l] - X[: ep_len + 1, 2 * nx_l]),
-        color="black",
-    )
-    axs[1].plot(
-        P_tie[2, 1] * (X[: ep_len + 1, 2 * nx_l] - X[: ep_len + 1, 1 * nx_l]),
-        color="black",
-    )
-    axs[1].plot(
-        P_tie[1, 2] * (X[-ep_len - 1 :, 1 * nx_l] - X[-ep_len - 1 :, 2 * nx_l]),
-        color="blue",
-    )
-    axs[1].plot(
-        P_tie[2, 1] * (X[-ep_len - 1 :, 2 * nx_l] - X[-ep_len - 1 :, 1 * nx_l]),
-        color="blue",
-    )
+# state and tie line plot for paper
+_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+axs[0].plot(X[: ep_len + 1, 12], color='black', linestyle='--', linewidth = 0.8)
+axs[0].plot(X[-ep_len - 1 :, 12], color='black', linestyle='-', linewidth = 0.8)
+axs[0].axhline(theta_lim, color="r", linewidth=1)
+axs[0].axhline(-theta_lim, color="r", linewidth=1)
+axs[1].plot(P_tie[2, 3]* (X[: ep_len + 1, 8] - X[: ep_len + 1, 12]), color='black', linestyle='--', linewidth = 0.8)
+axs[1].plot(P_tie[2, 3]* (X[-ep_len - 1 :, 8] - X[-ep_len - 1 :, 12]), color='black', linestyle='-', linewidth = 0.8)
+axs[1].set_xlabel("$k$")
+axs[0].set_ylabel(r"$\Delta \theta_4$")
+#axs[1].set_ylabel(r"$P_{3,4}(\Delta \theta_3 - \Delta \theta_4)$")
+axs[1].set_ylabel(r"$\Delta P_{tie,3,4}$")
+plt.savefig("data/states.svg", format="svg", dpi=300)
 
 # parameters
 if LEARNED:
-    _, axs = plt.subplots(5, 2, constrained_layout=True, sharex=True)
-    idx = 1
-    axs[0, 0].plot(param_list[f'theta_lb_{idx}'])
-    axs[0, 0].set_ylabel("$\theta_l$")
-    axs[1, 0].plot(param_list[f'theta_ub_{idx}'])
-    axs[1, 0].set_ylabel("$\theta_u$")
-    axs[2, 0].plot(param_list[f'V0_{idx}'])
-    axs[2, 0].set_ylabel("$V_0$")
-    axs[3, 0].plot(param_list[f'b_{idx}'])
-    axs[3, 0].set_ylabel("$b$")
-    axs[4, 0].plot(param_list[f'f_x_{idx}'].reshape((num_eps+1, 4)))
-    axs[4, 0].set_ylabel("$f_x$")
-    axs[0, 1].plot(param_list[f'f_u_{idx}'].reshape((num_eps+1, 1)))
-    axs[0, 1].set_ylabel("$f_u$")
-    axs[1, 1].plot(param_list[f'Q_x_{idx}'].reshape((num_eps+1, 16)))
-    axs[1, 1].set_ylabel("$Q_x$")
-    axs[2, 1].plot(param_list[f'Q_u_{idx}'].reshape((num_eps+1, 1)))
-    axs[2, 1].set_ylabel("$Q_u$")
+    _, axs = plt.subplots(4, 2, constrained_layout=True, sharex=True)
+    idx = 2
+    axs[0, 0].plot(param_list[f'theta_lb_{idx}'], color = 'black', linewidth = 0.6)
+    axs[0, 0].set_ylabel(r"$\underline{\Delta \theta}_{3}, \overline{\Delta \theta}_{3}$")
+    axs[0, 0].plot(param_list[f'theta_ub_{idx}'], color = 'black', linewidth = 0.6)
+    axs[1, 0].plot(param_list[f'V0_{idx}'], color = 'black', linewidth = 0.6)
+    axs[1, 0].set_ylabel("$V_{3,0}$")
+    axs[2, 0].plot(param_list[f'b_{idx}'], color = 'black', linewidth = 0.6)
+    axs[2, 0].set_ylabel("$b_3$")
+    axs[3, 0].plot(param_list[f'f_x_{idx}'].reshape((num_eps+1, 4)), color = 'black', linewidth = 0.6)
+    axs[3, 0].set_ylabel("$f_3$")
+    axs[3, 0].plot(param_list[f'f_u_{idx}'].reshape((num_eps+1, 1)), color = 'black', linewidth = 0.6)
+    axs[0, 1].plot(param_list[f'Q_x_{idx}'].reshape((num_eps+1, 16)), color = 'black', linewidth = 0.6)
+    axs[0, 1].set_ylabel("$Q_{x_3}$")
+    axs[1, 1].plot(param_list[f'Q_u_{idx}'].reshape((num_eps+1, 1)), color = 'black', linewidth = 0.6)
+    axs[1, 1].set_ylabel("$Q_{u_3}$")
     if CENTRALISED:
-        axs[3, 1].plot(param_list[f'P_tie_{idx}_{idx-1}'])
-        axs[3, 1].set_ylabel("$P_0$")
-        axs[4, 1].plot(param_list[f'P_tie_{idx}_{idx+1}'])
-        axs[4, 1].set_ylabel("$P_1$")
+        axs[2, 1].plot(param_list[f'P_tie_{idx}_{idx-1}'], color = 'black', linewidth = 0.6)
+        axs[2, 1].set_ylabel("$P_{3,2}$")
+        axs[3, 1].plot(param_list[f'P_tie_{idx}_{idx+1}'], color = 'black', linewidth = 0.6)
+        axs[3, 1].set_ylabel("$P_{3,4}$")
     else:
-        axs[3, 1].plot(param_list[f'P_tie_0_{idx}'])
-        axs[3, 1].set_ylabel("$P_0$")
-        axs[4, 1].plot(param_list[f'P_tie_1_{idx}'])
-        axs[4, 1].set_ylabel("$P_1$")
+        axs[2, 1].plot(param_list[f'P_tie_0_{idx}'], color = 'black', linewidth = 0.6)
+        axs[2, 1].set_ylabel("$P_{3,2}$")
+        axs[3, 1].plot(param_list[f'P_tie_1_{idx}'], color = 'black', linewidth = 0.6)
+        axs[3, 1].set_ylabel("$P_{3,2}$")
+    plt.savefig("data/params.svg", format="svg", dpi=300)
 plt.show()

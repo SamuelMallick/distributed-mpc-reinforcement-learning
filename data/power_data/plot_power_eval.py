@@ -43,10 +43,13 @@ R_n_eps = [sum((R_n[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 
 _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
 axs.plot(R_l_eps, 'o', color = 'black', markersize = 1.5)
-axs.plot(R_s_eps, 'x', color = 'blue', markersize = 1.5)
-axs.plot(R_n_eps, 's', color = 'green', markersize = 1.5)
+axs.plot(R_s_eps, 'o', color = 'blue', markersize = 1.5)
+axs.plot(R_n_eps, 'o', color = 'green', markersize = 1.5)
 axs.axhline(sum(R_l_eps)/len(R_l_eps), linestyle='--', color = 'black', linewidth=1)
 axs.axhline(sum(R_s_eps)/len(R_s_eps), linestyle='--', color = 'blue', linewidth=1)
 axs.axhline(sum(R_n_eps)/len(R_n_eps), linestyle='--', color = 'green', linewidth=1)
-
+axs.set_xlabel("episode")
+axs.set_ylabel(r"$\sum L$")
+axs.legend(["learned", "scenario", "nominal"])
+plt.savefig("data/eval.svg", format="svg", dpi=300)
 plt.show()
