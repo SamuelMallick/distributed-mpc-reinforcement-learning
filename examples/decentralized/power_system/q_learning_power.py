@@ -505,7 +505,7 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=discount_factor,
             update_strategy=ep_len,
-            learning_rate=ExponentialScheduler(5e-7, factor=1),  # 5e-6
+            learning_rate=ExponentialScheduler(7e-7, factor=0.99),  # 5e-6
             hessian_type="none",
             record_td_errors=True,
             exploration=EpsilonGreedyExploration(  # None,
