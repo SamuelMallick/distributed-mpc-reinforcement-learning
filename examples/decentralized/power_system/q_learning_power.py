@@ -31,8 +31,8 @@ import datetime
 np.random.seed(1)
 
 CENTRALISED = False
-LEARN = False
-USE_LEARNED_PARAMS = True
+LEARN = True
+USE_LEARNED_PARAMS = False
 
 STORE_DATA = True
 PLOT = False
@@ -516,7 +516,7 @@ agent = Log(  # type: ignore[var-annotated]
             fixed_dist_parameters_list=fixed_dist_parameters_list,
             discount_factor=discount_factor,
             update_strategy=ep_len,
-            learning_rate=ExponentialScheduler(7e-7, factor=0.99),  # 5e-6
+            learning_rate=ExponentialScheduler(7e-7, factor=0.98),  # 5e-6
             hessian_type="none",
             record_td_errors=True,
             exploration=EpsilonGreedyExploration(  # None,
@@ -536,8 +536,8 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-identifier = "dist_eval"
-num_eps = 100
+identifier = "line_40_with_con"
+num_eps = 300
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:

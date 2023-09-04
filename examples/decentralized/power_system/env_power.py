@@ -132,12 +132,32 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             + w.T @ np.maximum(0, -np.ones((n, 1)) * theta_lim - state[[0, 4, 8, 12]])
             + w.T @ np.maximum(0, state[[0, 4, 8, 12]] - np.ones((n, 1)) * theta_lim)
         )
+    
+    def get_dist_stage_cost(
+        self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
+    ) -> list[float]:
+        return [
+            (state[nx_l * i : nx_l * (i + 1), :] - self.x_o[nx_l * i : nx_l * (i + 1), :]).T @ self.Q_x_l @ (state[nx_l * i : nx_l * (i + 1), :] - self.x_o[nx_l * i : nx_l * (i + 1), :])
+            + (action[nu_l * i : nu_l * (i + 1), :] - self.u_o[nu_l * i : nu_l * (i + 1), :]).T @ self.Q_u_l @ (action[nu_l * i : nu_l * (i + 1), :] - self.u_o[nu_l * i : nu_l * (i + 1), :])
+            + self.phi_weight
+            * ts * (
+                sum(
+                    np.abs(self.P_tie_list[i, j] * (state[i * nx_l] - state[j * nx_l]))
+                    for j in range(n)
+                    if Adj[i, j] == 1
+                )
+            )
+            + w[0] @ np.maximum(0, - theta_lim - state[n*i])
+            + w[0] @ np.maximum(0, state[n*i] - theta_lim)
+            for i in range(n)
+        ]
 
     def step(
         self, action: cs.DM
     ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
         """Steps the system."""
         r = float(self.get_stage_cost(self.x, action))
+        r_dist = self.get_dist_stage_cost(self.x, action)
 
         # Change load according to scenario
         if self.step_counter == 5:
@@ -158,4 +178,4 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         x_new = self.integrator(x0=self.x, p=cs.vertcat(action, l))["xf"]
         self.x = x_new
         self.step_counter += 1
-        return x_new, r, False, False, {}
+        return x_new, r, False, False, {"r_dist": r_dist}

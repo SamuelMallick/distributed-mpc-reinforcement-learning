@@ -461,7 +461,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
     def consensus(self, x):
         """Runs the average consensus algorithm on the vector x"""
-        iters = 200  # number of consensus iters
+        x = x.reshape(self.n, 1)
+        iters = 100  # number of consensus iters
         for iter in range(iters):
             x = self.P @ x
         return x
