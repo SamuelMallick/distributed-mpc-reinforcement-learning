@@ -308,7 +308,8 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
     return A_d, B_d, L_d, A_d_c_list
 
 # use learned pars
-learned_file = "data/power_data/line_40/centralised.pkl"
+CENTRALISED = False
+learned_file = "data/power_data/line_40/distributed.pkl"
 with open(
     learned_file,
     "rb",
@@ -338,10 +339,17 @@ for i in range(n):
     })
 
 learned_P_tie = np.zeros((n, n))    # TODO: make this work also for distributed data
-for i in range(n):
-    for j in range(n):
-        if f"P_tie_{i}_{j}" in param_list:
-            learned_P_tie[i, j] = param_list[f"P_tie_{i}_{j}"][-1]
+if CENTRALISED:
+    for i in range(n):
+        for j in range(n):
+            if f"P_tie_{i}_{j}" in param_list:
+                learned_P_tie[i, j] = param_list[f"P_tie_{i}_{j}"][-1]
+else:
+    for i in range(n):
+        if f"P_tie_0_{i}" in param_list:
+            learned_P_tie[i, i-1] = param_list[f"P_tie_0_{i}"][-1]
+        if f"P_tie_1_{i}" in param_list:
+            learned_P_tie[i, i+1] = param_list[f"P_tie_1_{i}"][-1]
 
 def get_learned_pars_init_list():
     return learned_pars_init
