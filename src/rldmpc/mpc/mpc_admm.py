@@ -86,9 +86,6 @@ class MpcAdmm(Mpc[cs.SX]):
         self.x_cat = cs.vertcat(
             x_c[: (my_index * size), :], x[:, :-1], x_c[(my_index * size) :, :]
         )
-        self.x_dim = (
-            self.x_cat.shape
-        )  # ADMM procedure needs access to dimension of augmented state
 
         # Parameters in augmented lagrangian
         self.y = self.parameter("y", (size * (num_neighbours + 1), self.N))
