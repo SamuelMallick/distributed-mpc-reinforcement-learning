@@ -136,7 +136,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     def get_dist_stage_cost(
         self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
     ) -> list[float]:
-        return [
+        stage_costs = [
             (
                 state[nx_l * i : nx_l * (i + 1), :]
                 - self.x_o[nx_l * i : nx_l * (i + 1), :]
@@ -168,6 +168,7 @@ class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             + w[0] @ np.maximum(0, state[n * i] - theta_lim)
             for i in range(n)
         ]
+        return np.asarray(stage_costs).reshape(n, 1)
 
     def step(
         self, action: cs.DM

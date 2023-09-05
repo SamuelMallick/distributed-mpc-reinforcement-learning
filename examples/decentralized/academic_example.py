@@ -33,11 +33,6 @@ CENTRALISED = False
 Adj = np.array(
     [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
 )  # adjacency matrix of coupling in network
-# build a consensus matrix
-eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
-D_in = np.array([[1, 0, 0], [0, 2, 0], [0, 0, 1]])  # Hard coded D_in matrix from Adj
-L = D_in - Adj  # graph laplacian
-P = np.eye(3) - eps * L  # consensus matrix
 G = g_map(Adj)  # mapping from global var to local var indexes for ADMM
 
 
@@ -502,7 +497,7 @@ agent = Log(  # type: ignore[var-annotated]
             rho=LocalMpc.rho,
             n=LtiSystem.n,
             G=G,
-            P=P,
+            Adj=Adj,
             centralised_flag=CENTRALISED,
             centralised_debug=False,
             mpc_cent=mpc,

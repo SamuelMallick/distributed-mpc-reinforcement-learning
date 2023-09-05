@@ -20,6 +20,7 @@ from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.schedulers import ExponentialScheduler
 from rldmpc.core.admm import AdmmCoordinator
+from rldmpc.core.consensus import ConsensusCoordinator
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
@@ -40,7 +41,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
         fixed_dist_parameters_list: list,
         G: list[list[int]],
-        P: np.ndarray,
+        Adj: np.ndarray,
         rho: float,
         fixed_parameters: Union[
             None, Dict[str, npt.ArrayLike], Collection[Dict[str, npt.ArrayLike]]
@@ -62,7 +63,6 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self.centralised_flag = centralised_flag
         self.centralised_debug = centralised_debug
         self.n = n
-        self.P = P
 
         super().__init__(  # use itself as a learning agent for error checking
             mpc_cent,
@@ -136,6 +136,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 rho=rho,
                 iters=self.admm_iters,
             )
+
+            self.consensus_coordinator = ConsensusCoordinator(Adj, self.consensus_iters)
 
     # need to override train method to manually reset all agent MPCs and NOT activate updates for centralised
     def train(
@@ -316,12 +318,17 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 # Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
                 V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
                 Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
-                V_f = self.consensus(V_f_vec)[0] * len(self.agents)
-                Q_f = self.consensus(Q_f_vec)[0] * len(self.agents)
+                V_f = self.consensus_coordinator.average_consensus(V_f_vec)[0] * len(
+                    self.agents
+                )
+                Q_f = self.consensus_coordinator.average_consensus(Q_f_vec)[0] * len(
+                    self.agents
+                )
                 if dist_costs is not None:
-                    cost_f = self.consensus(np.asarray(dist_costs))[0] * len(
-                        self.agents
+                    av_cost = self.consensus_coordinator.average_consensus(
+                        np.asarray(dist_costs)
                     )
+                    cost_f = av_cost[0] * len(self.agents)
                 else:
                     cost_f = cost
                 for i in range(len(self.agents)):  # store experience for agents
@@ -371,18 +378,3 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             error_flag,
         ) = self.admm_coordinator.solve_admm(state, action=action)
         return local_sol_list, error_flag
-
-    def consensus(self, x):
-        """Runs the average consensus algorithm on the vector x"""
-        x = x.reshape(self.n, 1)
-        iters = 100  # number of consensus iters
-        for iter in range(iters):
-            x = self.P @ x
-        return x
-
-    def reset_admm_params(self):
-        """Reset all vars for admm to zero."""
-        for i in range(len(self.agents)):
-            self.y_list[i][:] = 0
-            self.x_temp_list[i][:] = 0
-        self.z[:] = 0

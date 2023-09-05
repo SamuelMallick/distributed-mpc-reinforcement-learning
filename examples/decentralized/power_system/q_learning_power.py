@@ -30,10 +30,11 @@ import datetime
 
 from rldmpc.mpc.mpc_admm import MpcAdmm
 
+
 np.random.seed(1)
 
 CENTRALISED = False
-LEARN = False
+LEARN = True
 USE_LEARNED_PARAMS = False
 
 STORE_DATA = False
@@ -58,12 +59,6 @@ b_scaling = 0.1  # scale the learnable model offset to prevent instability
 
 # matrices for distributed conensus and ADMM
 G = g_map(Adj)
-eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
-D_in = np.array(
-    [[1, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]
-)  # Hard coded D_in matrix from Adj
-L = D_in - Adj  # graph laplacian
-P = np.eye(n) - eps * L  # consensus matrix
 
 
 class LocalMpc(MpcAdmm):
@@ -484,7 +479,7 @@ agent = Log(  # type: ignore[var-annotated]
             rho=LocalMpc.rho,
             n=n,
             G=G,
-            P=P,
+            Adj=Adj,
             centralised_flag=CENTRALISED,
             centralised_debug=False,
             mpc_cent=mpc,
