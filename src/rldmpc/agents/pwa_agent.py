@@ -107,7 +107,7 @@ class PwaAgent(Agent):
         enforce the sequence s"""
 
         # TODO confirm that these parameters have been named correctly in the MPC
-        #  
+        #
         for i in range(len(s)):
             self.fixed_parameters[f"A_{i}"] = self.A[s[i]]
             self.fixed_parameters[f"B_{i}"] = self.B[s[i]]
@@ -115,48 +115,6 @@ class PwaAgent(Agent):
             self.fixed_parameters[f"S_{i}"] = self.S[s[i]]
             self.fixed_parameters[f"R_{i}"] = self.R[s[i]]
             self.fixed_parameters[f"T_{i}"] = self.T[s[i]]
-
-
-class LinearMpc(Mpc[cs.SX]):
-    """A simple linear MPC controller."""
-
-    horizon = 1
-
-    def __init__(self) -> None:
-        N = self.horizon
-        nlp = Nlp[cs.SX]()
-        super().__init__(nlp, N)
-
-        # variables (state, action, slack)
-        x, _ = self.state("x", 1)
-        u, _ = self.action(
-            "u",
-            1,
-        )
-
-        # dynamics
-        self.set_dynamics(lambda x, u: x, n_in=2, n_out=1)
-        self.minimize(cs.SX.zeros(1, 1))
-
-        # solver
-        opts = {
-            "expand": True,
-            "print_time": False,
-            "bound_consistency": True,
-            "calc_lam_x": True,
-            "calc_lam_p": False,
-            # "jit": True,
-            # "jit_cleanup": True,
-            "ipopt": {
-                # "linear_solver": "ma97",
-                # "linear_system_scaling": "mc19",
-                # "nlp_scaling_method": "equilibration-based",
-                "max_iter": 500,
-                "sb": "yes",
-                "print_level": 0,
-            },
-        }
-        self.init_solver(opts, solver="ipopt")
 
 
 if __name__ == "__main__":

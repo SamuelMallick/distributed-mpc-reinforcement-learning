@@ -21,6 +21,7 @@ from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.schedulers import ExponentialScheduler
 from rldmpc.core.admm import AdmmCoordinator
 from rldmpc.core.consensus import ConsensusCoordinator
+from rldmpc.mpc.mpc_admm import MpcAdmm
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
@@ -37,7 +38,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],
         learnable_parameters: LearnableParametersDict[SymType],
         n: int,
-        mpc_dist_list: list[Mpc[SymType]],
+        mpc_dist_list: list[MpcAdmm[SymType]],
         learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
         fixed_dist_parameters_list: list,
         G: list[list[int]],
