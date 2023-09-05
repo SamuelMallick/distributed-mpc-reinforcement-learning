@@ -19,7 +19,7 @@ from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
 from scipy.linalg import block_diag
-from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
+from rldmpc.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
 from rldmpc.cvxpy_system.admm import g_map
 from rldmpc.utils.discretisation import zero_order_hold, forward_euler, tustin
 import pickle
