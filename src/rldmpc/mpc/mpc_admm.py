@@ -1,8 +1,8 @@
-from typing import Callable, Literal, Optional, Tuple, TypeVar, Union
+from typing import Literal, Optional, TypeVar
 import casadi as cs
+import numpy as np
 from csnlp.wrappers import Mpc
 from csnlp.wrappers.wrapper import Nlp
-import numpy.typing as npt
 
 SymType = TypeVar("SymType", cs.SX, cs.MX)
 
@@ -44,11 +44,24 @@ class MpcAdmm(Mpc[cs.SX]):
         ValueError
             Raises if the shooting method is invalid; or if any of the horizons are
             invalid."""
+        self._fixed_pars_init = {}
 
         super().__init__(
             nlp, prediction_horizon, control_horizon, input_spacing, shooting
         )
         self.N = prediction_horizon
+
+    @property
+    def fixed_pars_init(self) -> int:
+        """Gets the prediction horizon of the MPC controller."""
+        return self._fixed_pars_init
+
+    @fixed_pars_init.setter
+    def fixed_pars_init(self, value):
+        """Prevent setting the dictionary, as it must contain the init values for y and z"""
+        raise ValueError(
+            "Can't set the value of fixed_pars_init. You can only add too it."
+        )
 
     def augmented_state(self, num_neighbours, my_index, size: int = 1):
         """Generates the local state and variables for the copies of neighbour
@@ -73,10 +86,15 @@ class MpcAdmm(Mpc[cs.SX]):
         self.x_cat = cs.vertcat(
             x_c[: (my_index * size), :], x[:, :-1], x_c[(my_index * size) :, :]
         )
-        self.x_dim = self.x_cat.shape   # ADMM procedure needs access to dimension of augmented state
+        self.x_dim = (
+            self.x_cat.shape
+        )  # ADMM procedure needs access to dimension of augmented state
 
+        # Parameters in augmented lagrangian
         self.y = self.parameter("y", (size * (num_neighbours + 1), self.N))
         self.z = self.parameter("z", (size * (num_neighbours + 1), self.N))
+        self._fixed_pars_init["y"] = np.zeros((size * (num_neighbours + 1), self.N))
+        self._fixed_pars_init["z"] = np.zeros((size * (num_neighbours + 1), self.N))
 
         return x, x_c
 

@@ -26,6 +26,8 @@ from rldmpc.cvxpy_system.admm import g_map
 import pickle
 import datetime
 
+from rldmpc.mpc.mpc_admm import MpcAdmm
+
 CENTRALISED = False
 
 Adj = np.array(
@@ -329,7 +331,7 @@ class LinearMpc(Mpc[cs.SX]):
         self.init_solver(opts, solver="ipopt")
 
 
-class MPCAdmm(Mpc[cs.SX]):
+class LocalMpc(MpcAdmm):
     """MPC for agent inner prob in ADMM."""
 
     rho = 0.5
@@ -377,14 +379,6 @@ class MPCAdmm(Mpc[cs.SX]):
             self.learnable_pars_init["A_c_" + str(i)] = self.A_c_l_init
 
         # fixed pars
-
-        self.fixed_pars_init = {
-            "y": np.zeros(
-                (nx_l * (num_neighbours + 1), N)
-            ),  # lagrange multipliers for ADMM
-            "z": np.zeros((nx_l * (num_neighbours + 1), N)),  # global consensus vars
-        }
-
         # parameters
 
         V0 = self.parameter("V0", (1,))
@@ -397,22 +391,10 @@ class MPCAdmm(Mpc[cs.SX]):
         A_c_list: list[np.ndarray] = []  # list of coupling matrices
         for i in range(num_neighbours):
             A_c_list.append(self.parameter("A_c_" + str(i), (nx_l, nx_l)))
-        y = self.parameter("y", (nx_l * (num_neighbours + 1), N))
-        z = self.parameter("z", (nx_l * (num_neighbours + 1), N))
 
         # variables (state+coupling, action, slack)
 
-        my_slice = slice(
-            nx_l * my_index, nx_l * (my_index + 1)
-        )  # used to slice the local state out of x
-
-        x, _ = self.state("x", nx_l)  # local state
-        x_c, _, _ = self.variable("x_c", (nx_l * (num_neighbours), N))  # coupling
-
-        # adding them together as the full decision var
-        x_cat = cs.vertcat(
-            x_c[: (my_index * nx_l), :], x[:, :-1], x_c[(my_index * nx_l) :, :]
-        )
+        x, x_c = self.augmented_state(num_neighbours, my_index, nx_l)
 
         # TODO here assumed action bounds are homogenous
         u, _ = self.action(
@@ -449,7 +431,7 @@ class MPCAdmm(Mpc[cs.SX]):
 
         # objective
         gammapowers = cs.DM(gamma ** np.arange(N)).T
-        self.minimize(
+        self.set_local_cost(
             V0
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
@@ -457,18 +439,8 @@ class MPCAdmm(Mpc[cs.SX]):
                 gammapowers
                 * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + w.T @ s)
             )
-            + sum(
-                (y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N)
-            )  # TODO: check the same as above
-            + sum(
-                ((self.rho / 2) * cs.norm_2(x_cat[:, [k]] - z[:, [k]]) ** 2)
-                for k in range(N)
-            )
         )
 
-        self.x_dim = (
-            x_cat.shape
-        )  # assigning it to class so that the dimension can be retreived later by admm procedure
         self.nx_l = nx_l
         self.nu_l = nu_l
 
@@ -509,7 +481,7 @@ mpc_dist_list: list[Mpc] = []
 learnable_dist_parameters_list: list[LearnableParametersDict] = []
 fixed_dist_parameters_list: list = []
 for i in range(LtiSystem.n):
-    mpc_dist_list.append(MPCAdmm(num_neighbours=len(G[i]) - 1, my_index=G[i].index(i)))
+    mpc_dist_list.append(LocalMpc(num_neighbours=len(G[i]) - 1, my_index=G[i].index(i)))
     learnable_dist_parameters_list.append(
         LearnableParametersDict[cs.SX](
             (
@@ -523,11 +495,11 @@ for i in range(LtiSystem.n):
     fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
 
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e0)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
-            rho=MPCAdmm.rho,
+            rho=LocalMpc.rho,
             n=LtiSystem.n,
             G=G,
             P=P,
@@ -559,8 +531,8 @@ agent = Log(  # type: ignore[var-annotated]
 
 agent.train(env=env, episodes=1, seed=1)
 
-STORE_DATA = True
-PLOT = False
+STORE_DATA = False
+PLOT = True
 
 # extract data
 if len(env.observations) > 0:
