@@ -181,6 +181,7 @@ def get_pars_init_list() -> list[Dict]:
     """Get initial guesses for learnable parameters (exluding P_tie)."""
     return pars_init
 
+
 # create initial guesses as a purturbation of initial P_tie vals
 norm_lim = 2.0
 P_tie_init = P_tie.copy()
@@ -188,6 +189,8 @@ for i in range(n):
     for j in range(n):
         if P_tie_init[i, j] != 0:
             P_tie_init[i, j] += np.random.uniform(-norm_lim, norm_lim)
+
+
 def get_P_tie_init() -> np.ndarray:
     """Get initial guesses for learnable P_tie values."""
     return P_tie_init
@@ -307,6 +310,7 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
         A_d_c_list.append(B_d_comb[:, 2 * nu_l + i * nx_l : 2 * nu_l + (i + 1) * nx_l])
     return A_d, B_d, L_d, A_d_c_list
 
+
 # use learned pars
 CENTRALISED = False
 learned_file = "data/power_data/line_40/distributed.pkl"
@@ -322,23 +326,25 @@ with open(
 
 learned_pars_init = []
 for i in range(n):
-    learned_pars_init.append({
-        "H": H_list[i],
-        "R": R_list[i],
-        "D": D_list[i],
-        "T_t": T_t_list[i],
-        "T_g": T_g_list[i],
-        "theta_lb": param_list[f"theta_lb_{i}"][-1],
-        "theta_ub": param_list[f"theta_ub_{i}"][-1],
-        "V0": param_list[f"V0_{i}"][-1],
-        "b": param_list[f"b_{i}"][-1],
-        "f_x": param_list[f"f_x_{i}"][-1, :],
-        "f_u": param_list[f"f_u_{i}"][-1, :],
-        "Q_x": param_list[f"Q_x_{i}"][-1, :],
-        "Q_u": param_list[f"Q_u_{i}"][-1, :],
-    })
+    learned_pars_init.append(
+        {
+            "H": H_list[i],
+            "R": R_list[i],
+            "D": D_list[i],
+            "T_t": T_t_list[i],
+            "T_g": T_g_list[i],
+            "theta_lb": param_list[f"theta_lb_{i}"][-1],
+            "theta_ub": param_list[f"theta_ub_{i}"][-1],
+            "V0": param_list[f"V0_{i}"][-1],
+            "b": param_list[f"b_{i}"][-1],
+            "f_x": param_list[f"f_x_{i}"][-1, :],
+            "f_u": param_list[f"f_u_{i}"][-1, :],
+            "Q_x": param_list[f"Q_x_{i}"][-1, :],
+            "Q_u": param_list[f"Q_u_{i}"][-1, :],
+        }
+    )
 
-learned_P_tie = np.zeros((n, n))    # TODO: make this work also for distributed data
+learned_P_tie = np.zeros((n, n))  # TODO: make this work also for distributed data
 if CENTRALISED:
     for i in range(n):
         for j in range(n):
@@ -347,12 +353,14 @@ if CENTRALISED:
 else:
     for i in range(n):
         if f"P_tie_0_{i}" in param_list:
-            learned_P_tie[i, i-1] = param_list[f"P_tie_0_{i}"][-1]
+            learned_P_tie[i, i - 1] = param_list[f"P_tie_0_{i}"][-1]
         if f"P_tie_1_{i}" in param_list:
-            learned_P_tie[i, i+1] = param_list[f"P_tie_1_{i}"][-1]
+            learned_P_tie[i, i + 1] = param_list[f"P_tie_1_{i}"][-1]
+
 
 def get_learned_pars_init_list():
     return learned_pars_init
+
 
 def get_learned_P_tie_init():
     return learned_P_tie

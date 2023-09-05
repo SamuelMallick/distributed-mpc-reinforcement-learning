@@ -5,7 +5,7 @@ from matplotlib.ticker import FormatStrFormatter, ScalarFormatter
 
 plt.rc("text", usetex=True)
 
-CENTRALISED = True
+CENTRALISED = False
 LEARNED = True
 num_eps = 300
 ep_len = 100
@@ -25,9 +25,9 @@ P_tie = np.array(
 colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
 
 with open(
-    "data/power_data/line_40/centralised.pkl",
-    #"data/power_data/scenario/power_scenario_79.pkl",
-    #"data/power_data/nominal/centralised.pkl",
+    "data/power_data/line_40/distributed.pkl",
+    # "data/power_data/scenario/power_scenario_79.pkl",
+    # "data/power_data/nominal/centralised.pkl",
     "rb",
 ) as file:
     X = pickle.load(file)
@@ -48,8 +48,8 @@ av_cost_nom = 349
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
 axs[0].plot(TD_eps, "o", color="black", markersize=0.8)
 axs[1].plot(R_eps, "o", color="black", markersize=0.8)
-#axs[1].axhline(av_cost_scen, color = 'blue', linewidth=1)
-#axs[1].axhline(av_cost_nom, color = 'green', linewidth=1)
+# axs[1].axhline(av_cost_scen, color = 'blue', linewidth=1)
+# axs[1].axhline(av_cost_nom, color = 'green', linewidth=1)
 axs[0].set_ylabel(r"$\overline{\delta}$")
 axs[1].set_ylabel(r"$\sum L$")
 axs[1].set_xlabel("episode")
@@ -59,10 +59,10 @@ plt.savefig("data/TD.svg", format="svg", dpi=300)
 viol_count = 0
 for i in range(X.shape[0]):
     for j in range(n):
-        if X[i, j*nx_l] > theta_lim or X[i, j*nx_l] < -theta_lim:
+        if X[i, j * nx_l] > theta_lim or X[i, j * nx_l] < -theta_lim:
             viol_count += 1
             break
-viol_percent = (viol_count/X.shape[0])*100
+viol_percent = (viol_count / X.shape[0]) * 100
 print(f"Violated {viol_percent}% of time-steps")
 
 # first episode
@@ -124,15 +124,24 @@ if True:
 
 # state and tie line plot for paper
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-axs[0].plot(X[: ep_len + 1, 12], color='black', linestyle='--', linewidth = 0.8)
-axs[0].plot(X[-ep_len - 1 :, 12], color='black', linestyle='-', linewidth = 0.8)
+axs[0].plot(X[: ep_len + 1, 12], color="black", linestyle="--", linewidth=0.8)
+axs[0].plot(X[-ep_len - 1 :, 12], color="black", linestyle="-", linewidth=0.8)
 axs[0].axhline(theta_lim, color="r", linewidth=1)
 axs[0].axhline(-theta_lim, color="r", linewidth=1)
-axs[1].plot(P_tie[2, 3]* (X[: ep_len + 1, 8] - X[: ep_len + 1, 12]), color='black', linestyle='--', linewidth = 0.8)
-axs[1].plot(P_tie[2, 3]* (X[-ep_len - 1 :, 8] - X[-ep_len - 1 :, 12]), color='black', linestyle='-', linewidth = 0.8)
+axs[1].plot(
+    P_tie[2, 3] * (X[: ep_len + 1, 8] - X[: ep_len + 1, 12]),
+    color="black",
+    linestyle="--",
+    linewidth=0.8,
+)
+axs[1].plot(
+    P_tie[2, 3] * (X[-ep_len - 1 :, 8] - X[-ep_len - 1 :, 12]),
+    color="black",
+    linestyle="-",
+    linewidth=0.8,
+)
 axs[1].set_xlabel("$k$")
-axs[0].set_ylabel(r"$\Delta \theta_4$")
-#axs[1].set_ylabel(r"$P_{3,4}(\Delta \theta_3 - \Delta \theta_4)$")
+axs[0].set_ylabel(r"$\Delta \phi_4$")
 axs[1].set_ylabel(r"$\Delta P_{tie,3,4}$")
 plt.savefig("data/states.svg", format="svg", dpi=300)
 
@@ -140,29 +149,39 @@ plt.savefig("data/states.svg", format="svg", dpi=300)
 if LEARNED:
     _, axs = plt.subplots(4, 2, constrained_layout=True, sharex=True)
     idx = 2
-    axs[0, 0].plot(param_list[f'theta_lb_{idx}'], color = 'black', linewidth = 0.6)
-    axs[0, 0].set_ylabel(r"$\underline{\Delta \theta}_{3}, \overline{\Delta \theta}_{3}$")
-    axs[0, 0].plot(param_list[f'theta_ub_{idx}'], color = 'black', linewidth = 0.6)
-    axs[1, 0].plot(param_list[f'V0_{idx}'], color = 'black', linewidth = 0.6)
+    axs[0, 0].plot(param_list[f"theta_lb_{idx}"], color="black", linewidth=0.6)
+    axs[0, 0].set_ylabel(r"$\underline{\Delta \phi}_{3}, \overline{\Delta \phi}_{3}$")
+    axs[0, 0].plot(param_list[f"theta_ub_{idx}"], color="black", linewidth=0.6)
+    axs[1, 0].plot(param_list[f"V0_{idx}"], color="black", linewidth=0.6)
     axs[1, 0].set_ylabel("$V_{3,0}$")
-    axs[2, 0].plot(param_list[f'b_{idx}'], color = 'black', linewidth = 0.6)
+    axs[2, 0].plot(param_list[f"b_{idx}"], color="black", linewidth=0.6)
     axs[2, 0].set_ylabel("$b_3$")
-    axs[3, 0].plot(param_list[f'f_x_{idx}'].reshape((num_eps+1, 4)), color = 'black', linewidth = 0.6)
+    axs[3, 0].plot(
+        param_list[f"f_x_{idx}"].reshape((num_eps + 1, 4)), color="black", linewidth=0.6
+    )
     axs[3, 0].set_ylabel("$f_3$")
-    axs[3, 0].plot(param_list[f'f_u_{idx}'].reshape((num_eps+1, 1)), color = 'black', linewidth = 0.6)
-    axs[0, 1].plot(param_list[f'Q_x_{idx}'].reshape((num_eps+1, 16)), color = 'black', linewidth = 0.6)
+    axs[3, 0].plot(
+        param_list[f"f_u_{idx}"].reshape((num_eps + 1, 1)), color="black", linewidth=0.6
+    )
+    axs[0, 1].plot(
+        param_list[f"Q_x_{idx}"].reshape((num_eps + 1, 16)),
+        color="black",
+        linewidth=0.6,
+    )
     axs[0, 1].set_ylabel("$Q_{x_3}$")
-    axs[1, 1].plot(param_list[f'Q_u_{idx}'].reshape((num_eps+1, 1)), color = 'black', linewidth = 0.6)
+    axs[1, 1].plot(
+        param_list[f"Q_u_{idx}"].reshape((num_eps + 1, 1)), color="black", linewidth=0.6
+    )
     axs[1, 1].set_ylabel("$Q_{u_3}$")
     if CENTRALISED:
-        axs[2, 1].plot(param_list[f'P_tie_{idx}_{idx-1}'], color = 'black', linewidth = 0.6)
+        axs[2, 1].plot(param_list[f"P_tie_{idx}_{idx-1}"], color="black", linewidth=0.6)
         axs[2, 1].set_ylabel("$P_{3,2}$")
-        axs[3, 1].plot(param_list[f'P_tie_{idx}_{idx+1}'], color = 'black', linewidth = 0.6)
+        axs[3, 1].plot(param_list[f"P_tie_{idx}_{idx+1}"], color="black", linewidth=0.6)
         axs[3, 1].set_ylabel("$P_{3,4}$")
     else:
-        axs[2, 1].plot(param_list[f'P_tie_0_{idx}'], color = 'black', linewidth = 0.6)
+        axs[2, 1].plot(param_list[f"P_tie_0_{idx}"], color="black", linewidth=0.6)
         axs[2, 1].set_ylabel("$P_{3,2}$")
-        axs[3, 1].plot(param_list[f'P_tie_1_{idx}'], color = 'black', linewidth = 0.6)
+        axs[3, 1].plot(param_list[f"P_tie_1_{idx}"], color="black", linewidth=0.6)
         axs[3, 1].set_ylabel("$P_{3,2}$")
     plt.savefig("data/params.svg", format="svg", dpi=300)
 plt.show()

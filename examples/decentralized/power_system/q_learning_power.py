@@ -21,7 +21,7 @@ from model_Hycon2 import (
     get_P_tie_init,
     get_learnable_dynamics_local,
     get_learned_pars_init_list,
-    get_learned_P_tie_init
+    get_learned_P_tie_init,
 )
 from plot_power import plot_power_system_data
 from env_power import PowerSystem

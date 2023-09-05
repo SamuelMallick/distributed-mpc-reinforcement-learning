@@ -8,7 +8,7 @@ num_eps = 100
 ep_len = 100
 
 with open(
-    "data/power_data/line_40/centralised_eval.pkl",
+    "data/power_data/line_40/dist_eval.pkl",
     "rb",
 ) as file:
     X_l = pickle.load(file)
@@ -42,12 +42,12 @@ R_s_eps = [sum((R_s[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 R_n_eps = [sum((R_n[ep_len * i : ep_len * (i + 1)])) for i in range(num_eps)]
 
 _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
-axs.plot(R_l_eps, 'o', color = 'black', markersize = 1.5)
-axs.plot(R_s_eps, 'o', color = 'blue', markersize = 1.5)
-axs.plot(R_n_eps, 'o', color = 'green', markersize = 1.5)
-axs.axhline(sum(R_l_eps)/len(R_l_eps), linestyle='--', color = 'black', linewidth=1)
-axs.axhline(sum(R_s_eps)/len(R_s_eps), linestyle='--', color = 'blue', linewidth=1)
-axs.axhline(sum(R_n_eps)/len(R_n_eps), linestyle='--', color = 'green', linewidth=1)
+axs.plot(R_l_eps, "o", color="black", markersize=1.5)
+axs.plot(R_s_eps, "o", color="blue", markersize=1.5)
+axs.plot(R_n_eps, "o", color="green", markersize=1.5)
+axs.axhline(sum(R_l_eps) / len(R_l_eps), linestyle="--", color="black", linewidth=1)
+axs.axhline(sum(R_s_eps) / len(R_s_eps), linestyle="--", color="blue", linewidth=1)
+axs.axhline(sum(R_n_eps) / len(R_n_eps), linestyle="--", color="green", linewidth=1)
 axs.set_xlabel("episode")
 axs.set_ylabel(r"$\sum L$")
 axs.legend(["learned", "scenario", "nominal"])
