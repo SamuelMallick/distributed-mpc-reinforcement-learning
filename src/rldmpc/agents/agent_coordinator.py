@@ -19,7 +19,7 @@ from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.schedulers import ExponentialScheduler
-from rldmpc.core.admm import Admm
+from rldmpc.core.admm import AdmmCoordinator
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
@@ -127,7 +127,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 0
             ].nu_l  # used to seperate control into each agents
 
-            self.admm_coordinator = Admm(
+            self.admm_coordinator = AdmmCoordinator(
                 self.agents,
                 G,
                 N=mpc_cent.horizon,

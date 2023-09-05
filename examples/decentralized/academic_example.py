@@ -21,7 +21,7 @@ from mpcrl.core.exploration import EpsilonGreedyExploration, StepWiseExploration
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
-from rldmpc.cvxpy_system.admm import g_map
+from rldmpc.core.admm import g_map
 
 import pickle
 import datetime

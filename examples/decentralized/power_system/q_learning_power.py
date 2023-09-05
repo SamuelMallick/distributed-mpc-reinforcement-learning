@@ -13,7 +13,7 @@ from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
 from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
-from rldmpc.cvxpy_system.admm import g_map
+from rldmpc.core.admm import g_map
 from model_Hycon2 import (
     get_model_details,
     get_pars_init_list,

@@ -3,8 +3,18 @@ from mpcrl import Agent
 import numpy as np
 import casadi as cs
 
+def g_map(Adj: np.ndarray):
+    """Construct the mapping from local to global variables from an adjacency matrix."""
+    n = Adj.shape[0]  # number of agents
+    G: list[list[int]] = []
+    for i in range(n):
+        G.append([])
+        for j in range(n):
+            if Adj[i, j] == 1 or i == j:
+                G[i].append(j)
+    return G
 
-class Admm:
+class AdmmCoordinator:
     """Class for coordinating the ADMM procedure of a network of agents"""
 
     def __init__(
