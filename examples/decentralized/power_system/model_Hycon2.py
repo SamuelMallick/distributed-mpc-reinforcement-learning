@@ -313,7 +313,7 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
 
 # use learned pars
 CENTRALISED = False
-learned_file = "data/power_data/line_40/distributed.pkl"
+learned_file = "data/power_data/line_40/distributed_con.pkl"
 with open(
     learned_file,
     "rb",

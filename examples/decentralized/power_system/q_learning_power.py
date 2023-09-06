@@ -34,11 +34,11 @@ from rldmpc.mpc.mpc_admm import MpcAdmm
 np.random.seed(1)
 
 CENTRALISED = False
-LEARN = True
-USE_LEARNED_PARAMS = False
+LEARN = False
+USE_LEARNED_PARAMS = True
 
-STORE_DATA = False
-PLOT = True
+STORE_DATA = True
+PLOT = False
 
 (
     n,
@@ -471,7 +471,7 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(20)
+ep_len = int(100)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
@@ -510,8 +510,8 @@ agent = Log(  # type: ignore[var-annotated]
     log_frequencies={"on_timestep_end": 1},
 )
 
-identifier = "line_40_with_con"
-num_eps = 1
+identifier = "line_40_with_con_eval"
+num_eps = 100
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:
