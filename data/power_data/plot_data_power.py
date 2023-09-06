@@ -25,7 +25,7 @@ P_tie = np.array(
 colors = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
 
 with open(
-    "data/power_data/line_40/distributed.pkl",
+    "data/power_data/line_40/distributed_con.pkl",
     # "data/power_data/scenario/power_scenario_79.pkl",
     # "data/power_data/nominal/centralised.pkl",
     "rb",
@@ -182,6 +182,6 @@ if LEARNED:
         axs[2, 1].plot(param_list[f"P_tie_0_{idx}"], color="black", linewidth=0.6)
         axs[2, 1].set_ylabel("$P_{3,2}$")
         axs[3, 1].plot(param_list[f"P_tie_1_{idx}"], color="black", linewidth=0.6)
-        axs[3, 1].set_ylabel("$P_{3,2}$")
+        axs[3, 1].set_ylabel("$P_{3,4}$")
     plt.savefig("data/params.svg", format="svg", dpi=300)
 plt.show()

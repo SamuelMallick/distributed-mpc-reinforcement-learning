@@ -1,12 +1,12 @@
 from typing import Collection, List, Literal, Optional, Union
 from csnlp import Nlp
 from csnlp.wrappers import Mpc
-from mpcrl import Agent
 import numpy as np
 import casadi as cs
+from mpcrl.agents.agent import ActType, Agent, ObsType, SymType
 
 
-class PwaAgent(Agent):
+class PwaAgent(Agent[SymType]):
     """An agent who has knowledge of it's own PWA dynamics and can use this to do things such as
     identify PWA regions given state and control trajectories."""
 
@@ -36,8 +36,8 @@ class PwaAgent(Agent):
             values. Use this to specify fixed parameters, that is, non-learnable. If
             `None`, then no fixed parameter is assumed.
         pwa_system: dict
-            Contains {S, R, T, A, B, c, D, E, F, G}, where each is a list of matrices defining dynamics.
-            When the inequality S[i]x + R[i]u <= T[i] is true, the dynamics are x^+ = A[i]x + B[i]u + c[i].
+            Contains {S, R, T, A, B, c, D, E, F, G, [Ac_j]}, where each is a list of matrices defining dynamics.
+            When the inequality S[i]x + R[i]u <= T[i] is true, the dynamics are x^+ = A[i]x + B[i]u + c[i] + sum_j Ac_j[i] x_j.
             State constraints are: Dx <= E.
             Control constraints are: Fu <= G.
         warmstart: 'last' or 'last-successful', optional
@@ -58,19 +58,33 @@ class PwaAgent(Agent):
         self.E = pwa_system["E"]
         self.F = pwa_system["F"]
         self.G = pwa_system["G"]
+        self.Ac = pwa_system["Ac"]
 
-    def next_state(self, x: np.ndarray, u: np.ndarray, d: np.ndarray):
-        """Increment the dynamics as x+ = A[i]x + B[i]u + c[i] + d
-        if S[i]x + R[i]u <= T."""
+        self.num_neighbours = len(self.Ac[0])
+
+    def next_state(self, x: np.ndarray, u: np.ndarray, xc: List[np.ndarray] = None):
+        """Increment the dynamics as x+ = A[i]x + B[i]u + c[i] + sum_j Ac[i]_j xc_j
+        if S[i]x + R[i]u <= T.
+        If the coupled states xc are not passed the coupling part of dynamics is ignored."""
         for i in range(len(self.S)):
             if all(self.S[i] @ x + self.R[i] @ u <= self.T[i]):
-                return A[i] @ x + B[i] @ u + c[i] + d
+                if xc is None:
+                    return self.A[i] @ x + self.B[i] @ u + self.c[i]
+                else:
+                    return (
+                        self.A[i] @ x
+                        + self.B[i] @ u
+                        + self.c[i]
+                        + sum(self.Ac[i][j] @ xc[j] for j in range(self.num_neighbours))
+                    )
 
         raise RuntimeError("Didn't find PWA region for given state-control.")
 
-    def eval_sequences(self, x0: np.ndarray, u: np.ndarray, d: np.ndarray):
+    def eval_sequences(
+        self, x0: np.ndarray, u: np.ndarray, xc: List[np.ndarray] = None
+    ):
         """Evaluate all possible sqitching sequences of PWA dynamics by rolling out
-        dynamics from state x, applying control u, and subject to disturbances (or coupling) d."""
+        dynamics from state x, applying control u, and coupled states xc."""
 
         N = u.shape[1]  # horizon length
         s = [[0] * N]  # list of sequences, start with just zeros
@@ -90,7 +104,12 @@ class PwaAgent(Agent):
                         s_temp[j][k] = current_regions[i]
                     s = s + s_temp
             # rollout dynamics by one
-            x = self.next_state(x, u[:, [k]], d[:, [k]])
+            if xc is None:
+                x = self.next_state(x, u[:, [k]])
+            else:
+                x = self.next_state(
+                    x, u[:, [k]], [xc[i][:, [k]] for i in range(self.num_neighbours)]
+                )
         return s
 
     def identify_regions(self, x: np.ndarray, u: np.ndarray, eps: int = 0):
@@ -116,41 +135,3 @@ class PwaAgent(Agent):
             self.fixed_parameters[f"R_{i}"] = self.R[s[i]]
             self.fixed_parameters[f"T_{i}"] = self.T[s[i]]
 
-
-if __name__ == "__main__":
-    # test system
-    n = 2
-    m = 1
-    S = [np.array([[1, 0]]), np.array([[-1, 0]])]
-    R = [np.zeros((1, m)), np.zeros((1, m))]
-    T = [np.array([[1]]), np.array([[-1]])]
-    A = [np.array([[1, 0.2], [0, 1]]), np.array([[0.5, 0.2], [0, 1]])]
-    B = [np.array([[0], [1]]), np.array([[0], [1]])]
-    c = [np.zeros((n, 1)), np.array([[0.5], [0]])]
-
-    D = np.array([[-1, 1], [-3, -1], [0.2, 1], [-1, 0], [1, 0], [0, -1]])
-    E = np.array([[15], [25], [9], [6], [8], [10]])
-    F = np.array([[1], [-1]])
-    G = np.array([[1], [1]])
-
-    system = {
-        "S": S,
-        "R": R,
-        "T": T,
-        "A": A,
-        "B": B,
-        "c": c,
-        "D": D,
-        "E": E,
-        "F": F,
-        "G": G,
-    }
-    agent = PwaAgent(LinearMpc(), {}, system)
-
-    x0 = np.array([[0.8], [1.2]])
-    u = -1 * np.ones((1, 5))
-    d = np.zeros((1, 5))
-
-    s = agent.eval_sequences(x0, u, d)
-    agent.set_sequence(s[0])
-    pass

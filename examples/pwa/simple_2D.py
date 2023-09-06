@@ -7,8 +7,14 @@ import casadi as cs
 import numpy.typing as npt
 from typing import Any, Dict, List, Optional, Tuple, Union
 from scipy.linalg import block_diag
-
+from mpcrl.wrappers.envs import MonitorEpisodes
+from gymnasium.wrappers import TimeLimit
+from mpcrl.wrappers.agents import Log, RecordUpdates
+import logging
 from rldmpc.mpc.mpc_admm import MpcAdmm
+from rldmpc.core.admm import g_map
+from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
+import matplotlib.pyplot as plt
 
 n = 3  # number of agents
 nx_l = 2
@@ -28,12 +34,41 @@ G = np.array([[1], [1]])
 Adj = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]])  # adjacency matrix
 Ac = np.array([[0, 0], [0, 0.1]])  # coupling matrix between any agents
 
+# this part of the system is common to everyone as they share the same dynamics
+system = {
+    "S": S,
+    "R": R,
+    "T": T,
+    "A": A,
+    "B": B,
+    "c": c,
+    "D": D,
+    "E": E,
+    "F": F,
+    "G": G,
+}
+systems = []  # list of systems, 1 for each agent
+for i in range(n):
+    systems.append(system.copy())
+    # add the coupling part of the system
+    Ac_i = []
+    for j in range(n):
+        if Adj[i, j] == 1:
+            Ac_i.append(Ac)
+    systems[i]["Ac"] = []
+    for j in range(
+        len(S)
+    ):  # duplicate it for each PWA region, as for this PWA system the coupling matrices do not change
+        systems[i]["Ac"] = systems[i]["Ac"] + [Ac_i]
+
 Q_x_l = np.eye(nx_l)
 Q_u_l = 0.1 * np.eye(nu_l)
 N = 5
 
 Q_x = block_diag(*([Q_x_l] * n))
 Q_u = block_diag(*([Q_u_l] * n))
+
+G_map = g_map(Adj)
 
 
 class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
@@ -47,7 +82,9 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the LTI system."""
         super().reset(seed=seed, options=options)
-        self.x = np.tile([-5, 9], self.n).reshape(nx_l * n, 1)
+        # self.x = np.tile([-5, 9], n).reshape(nx_l * n, 1)
+        self.x = np.array([[-5, 9, 4, -2, 1, 3]]).T
+        # self.x = np.array([[0, 0, 6, 0, 0, 1]]).T
         return self.x, {}
 
     def get_stage_cost(
@@ -66,9 +103,9 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             local_state = self.x[nx_l * i : nx_l * (i + 1), :]
             local_action = action[nu_l * i : nu_l * (i + 1), :]
             for j in range(len(S)):
-                if all(S[i] @ local_state + R[i] @ local_action <= T[i]):
+                if all(S[j] @ local_state + R[j] @ local_action <= T[j]):
                     x_new[nx_l * i : nx_l * (i + 1), :] = (
-                        A[i] @ local_state + B[i] @ local_action + c[i]
+                        A[j] @ local_state + B[j] @ local_action + c[j]
                     )
             coupling = np.zeros((nx_l, 1))
             for j in range(n):
@@ -114,6 +151,15 @@ class SwitchingMpc(MpcAdmm):
             R_list.append(self.parameter(f"R_{k}", (r, nu_l)))
             T_list.append(self.parameter(f"T_{k}", (r, 1)))
 
+            # to initialise we add the first region for all, this will be ovverridden by the agent
+            # when the first real switching sequence is identified
+            self.fixed_pars_init[f"A_{k}"] = A[0]
+            self.fixed_pars_init[f"B_{k}"] = B[0]
+            self.fixed_pars_init[f"c_{k}"] = c[0]
+            self.fixed_pars_init[f"S_{k}"] = S[0]
+            self.fixed_pars_init[f"R_{k}"] = R[0]
+            self.fixed_pars_init[f"T_{k}"] = T[0]
+
         x, x_c = self.augmented_state(num_neighbours, my_index, size=nx_l)
 
         u, _ = self.action(
@@ -152,6 +198,7 @@ class SwitchingMpc(MpcAdmm):
         self.set_local_cost(
             sum(
                 x[:, [k]].T @ Q_x_l @ x[:, [k]] + u[:, [k]].T @ Q_u_l @ u[:, [k]]
+                for k in range(N)
             )
         )
 
@@ -175,3 +222,46 @@ class SwitchingMpc(MpcAdmm):
             },
         }
         self.init_solver(opts, solver="ipopt")
+
+
+# distributed mpcs and params
+local_mpcs: list[SwitchingMpc] = []
+local_fixed_dist_parameters: list[dict] = []
+for i in range(n):
+    local_mpcs.append(
+        SwitchingMpc(num_neighbours=len(G_map[i]) - 1, my_index=G_map[i].index(i))
+    )
+    local_fixed_dist_parameters.append(local_mpcs[i].fixed_pars_init)
+
+# env
+env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20)))
+
+# coordinator
+agent = Log(
+    GAdmmCoordinator(
+        local_mpcs, local_fixed_dist_parameters, systems, G_map, Adj, local_mpcs[0].rho
+    ),
+    level=logging.DEBUG,
+    log_frequencies={"on_timestep_end": 200},
+)
+
+agent.evaluate(env=env, episodes=1, seed=1)
+
+
+if len(env.observations) > 0:
+    X = env.observations[0].squeeze()
+    U = env.actions[0].squeeze()
+    R = env.rewards[0]
+else:
+    X = np.squeeze(env.ep_observations)
+    U = np.squeeze(env.ep_actions)
+    R = np.squeeze(env.ep_rewards)
+
+_, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+axs[0].plot(X[:, [0, 2, 4]])
+axs[1].plot(X[:, [1, 3, 5]])
+_, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
+axs.plot(U)
+_, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)
+axs.plot(R.squeeze())
+plt.show()
