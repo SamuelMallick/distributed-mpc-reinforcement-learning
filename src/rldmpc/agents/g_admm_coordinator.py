@@ -8,9 +8,19 @@ import casadi as cs
 import numpy.typing as npt
 from rldmpc.agents.pwa_agent import PwaAgent
 from rldmpc.core.admm import AdmmCoordinator
-
+import logging
 from rldmpc.mpc.mpc_admm import MpcAdmm
+import matplotlib.pyplot as plt
 
+ADMM_DEBUG_PLOT = True
+
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level to control verbosity
+    format='%(asctime)s [%(levelname)s]: %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Log to the console
+    ]
+)
 
 class GAdmmCoordinator(Agent):
     """Coordinates the greedy ADMM algorithm for PWA agents"""
@@ -130,13 +140,17 @@ class GAdmmCoordinator(Agent):
         x = [state[self.nx_l * i : self.nx_l * (i + 1), :] for i in range(self.n)]
 
         # initial feasible control guess
-        u = [-np.ones((self.nu_l, self.N)) for i in range(self.n)]
+        u = [np.zeros((self.nu_l, self.N)) for i in range(self.n)]
 
         # generate initial feasible coupling via dynamics rollout
         x_rout = self.dynamics_rollout(x, u)
 
+        if ADMM_DEBUG_PLOT: # store control at each iter to plot ADMM convergence
+            u_plot_list = [np.zeros((self.nu_l, self.admm_iters)) for i in range(self.n)]
+            switch_plot_list = [[] for i in range(self.n)]
+
         for iter in range(self.admm_iters):
-            pass
+            logging.info(f"Greedy admm iter {iter}")
             # generate local sequences and choose one  - CHOICE: this can be done with vars from local output of ADMM
             # which may not have converged to consensus - therefore adding exploration OR a cooperative
             # dynamics rollout as before the loop
@@ -158,13 +172,19 @@ class GAdmmCoordinator(Agent):
                     if seqs[i] in new_seqs:
                         new_seqs.remove(seqs[i])
                     if len(new_seqs) > 0:
+                        logging.info(f"Agent {i} switched: {seqs[i]} to {new_seqs[0]}")
                         seqs[i] = new_seqs[0]   # for now choosing arbritrarily first
+
+                        if ADMM_DEBUG_PLOT:
+                            switch_plot_list[i].append(iter)
                 # set sequences
                 self.agents[i].set_sequence(seqs[i])
             
             # perform ADMM step
             action_list, sol_list, error_flag = self.admm_coordinator.solve_admm(state)
 
+            if ADMM_DEBUG_PLOT:
+                for i in range(self.n): u_plot_list[i][:, iter] = np.asarray(action_list[i])
             # extract the vars across the horizon from the ADMM sol for each agent
             for i in range(self.n):
                 u[i] = np.asarray(sol_list[i].vals['u'])
@@ -173,6 +193,9 @@ class GAdmmCoordinator(Agent):
                 for j in range(self.agents[i].num_neighbours):
                     xc_temp.append(xc_out[self.nx_l*j:self.nx_l*(j+1), :])
                 xc[i] = xc_temp
+
+        if ADMM_DEBUG_PLOT:
+            self.plot_admm_iters(u_plot_list, switch_plot_list)
 
         return cs.DM(action_list), sol_list
 
@@ -192,3 +215,10 @@ class GAdmmCoordinator(Agent):
                     x_temp[i][:, [k - 1]], u[i][:, [k]], xc_temp
                 )
         return x_temp
+
+    def plot_admm_iters(self, u_list, switch_list):
+        _, axs = plt.subplots(len(u_list), 1, constrained_layout=True, sharex=True)
+        for i in range(len(u_list)):
+            axs[i].plot(u_list[i].T)
+            axs[i].plot(switch_list[i], u_list[i][:, switch_list[i]].squeeze(), 'o')
+        plt.show()
