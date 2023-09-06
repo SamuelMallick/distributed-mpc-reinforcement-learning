@@ -38,7 +38,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],
         learnable_parameters: LearnableParametersDict[SymType],
         n: int,
-        mpc_dist_list: list[MpcAdmm[SymType]],
+        mpc_dist_list: list[MpcAdmm],
         learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
         fixed_dist_parameters_list: list,
         G: list[list[int]],
