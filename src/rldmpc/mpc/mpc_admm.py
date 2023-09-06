@@ -18,7 +18,7 @@ class MpcAdmm(Mpc[cs.SX]):
         input_spacing: int = 1,
         shooting: Literal["single", "multi"] = "multi",
     ) -> None:
-        """Initialises the MPC-ADMM wrapper around the NLP instance
+        """Initialises the ADMM based MPC
 
         Parameters
         ----------

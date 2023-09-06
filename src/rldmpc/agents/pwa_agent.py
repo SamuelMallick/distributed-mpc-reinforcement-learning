@@ -133,5 +133,6 @@ class PwaAgent(Agent[SymType]):
             self.fixed_parameters[f"c_{i}"] = self.c[s[i]]
             self.fixed_parameters[f"S_{i}"] = self.S[s[i]]
             self.fixed_parameters[f"R_{i}"] = self.R[s[i]]
-            self.fixed_parameters[f"T_{i}"] = self.T[s[i]]
-
+            self.fixed_parameters[f"T_{i}"] = self.T[s[i]]  
+            for j in range(self.num_neighbours):
+                self.fixed_parameters[f"Ac_{i}_{j}"] = self.Ac[s[i]][j]

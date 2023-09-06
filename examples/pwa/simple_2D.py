@@ -16,6 +16,8 @@ from rldmpc.core.admm import g_map
 from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
 import matplotlib.pyplot as plt
 
+from rldmpc.mpc.mpc_switching import MpcSwitching
+
 n = 3  # number of agents
 nx_l = 2
 nu_l = 1
@@ -118,15 +120,12 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         return x_new, r, False, False, {}
 
 
-class SwitchingMpc(MpcAdmm):
-    """An admm based mpc with constraints and dynamics at every time-step
-    that switch."""
-
+class LocalMpc(MpcSwitching):
     rho = 0.5
     horizon = N
 
     def __init__(self, num_neighbours, my_index) -> None:
-        """Instantiate inner MPC for admm.
+        """Instantiate inner switching MPC for admm.
         My index is used to pick out own state from the grouped coupling states.
         It should be passed in via the mapping G (G[i].index(i))"""
 
@@ -134,31 +133,6 @@ class SwitchingMpc(MpcAdmm):
         super().__init__(nlp, N)
         self.nx_l = nx_l
         self.nu_l = nu_l
-
-        # create the params for switching dynamics and contraints
-        A_list = []
-        B_list = []
-        c_list = []
-        S_list = []
-        R_list = []
-        T_list = []
-        r = T[0].shape[0]  # number of conditions when constraining a region
-        for k in range(N):
-            A_list.append(self.parameter(f"A_{k}", (nx_l, nx_l)))
-            B_list.append(self.parameter(f"B_{k}", (nx_l, nu_l)))
-            c_list.append(self.parameter(f"c_{k}", (nx_l, 1)))
-            S_list.append(self.parameter(f"S_{k}", (r, nx_l)))
-            R_list.append(self.parameter(f"R_{k}", (r, nu_l)))
-            T_list.append(self.parameter(f"T_{k}", (r, 1)))
-
-            # to initialise we add the first region for all, this will be ovverridden by the agent
-            # when the first real switching sequence is identified
-            self.fixed_pars_init[f"A_{k}"] = A[0]
-            self.fixed_pars_init[f"B_{k}"] = B[0]
-            self.fixed_pars_init[f"c_{k}"] = c[0]
-            self.fixed_pars_init[f"S_{k}"] = S[0]
-            self.fixed_pars_init[f"R_{k}"] = R[0]
-            self.fixed_pars_init[f"T_{k}"] = T[0]
 
         x, x_c = self.augmented_state(num_neighbours, my_index, size=nx_l)
 
@@ -173,24 +147,11 @@ class SwitchingMpc(MpcAdmm):
         for i in range(num_neighbours):
             x_c_list.append(x_c[nx_l * i : nx_l * (i + 1), :])
 
-        # dynamics and region constraints - added manually due to coupling
+        r = T[0].shape[0]  # number of conditions when constraining a region
+        self.set_dynamics(nx_l, nu_l, r, x, u, x_c_list)
+
+        # normal constraints
         for k in range(N):
-            coup = cs.SX.zeros(nx_l, 1)
-            for i in range(num_neighbours):  # get coupling expression
-                coup += Ac @ x_c_list[i][:, [k]]
-            self.constraint(
-                f"dynam_{k}",
-                A_list[k] @ x[:, [k]] + B_list[k] @ u[:, [k]] + c_list[k] + coup,
-                "==",
-                x[:, [k + 1]],
-            )
-            self.constraint(
-                f"region_{k}",
-                S_list[k] @ x[:, [k]] + R_list[k] @ u[:, [k]],
-                "<=",
-                T_list[k],
-            )
-            # also normal state and control constraints
             self.constraint(f"state_{k}", D @ x[:, [k]], "<=", E)
             self.constraint(f"control_{k}", F @ u[:, [k]], "<=", G)
 
@@ -225,11 +186,11 @@ class SwitchingMpc(MpcAdmm):
 
 
 # distributed mpcs and params
-local_mpcs: list[SwitchingMpc] = []
+local_mpcs: list[LocalMpc] = []
 local_fixed_dist_parameters: list[dict] = []
 for i in range(n):
     local_mpcs.append(
-        SwitchingMpc(num_neighbours=len(G_map[i]) - 1, my_index=G_map[i].index(i))
+        LocalMpc(num_neighbours=len(G_map[i]) - 1, my_index=G_map[i].index(i))
     )
     local_fixed_dist_parameters.append(local_mpcs[i].fixed_pars_init)
 
