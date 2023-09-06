@@ -12,8 +12,8 @@ from mpcrl.wrappers.envs import MonitorEpisodes
 from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.schedulers import ExponentialScheduler
-from rldmpc.agents.agent_coordinator import LstdQLearningAgentCoordinator
-from rldmpc.cvxpy_system.admm import g_map
+from rldmpc.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
+from rldmpc.core.admm import g_map
 from model_Hycon2 import (
     get_model_details,
     get_pars_init_list,
@@ -21,12 +21,15 @@ from model_Hycon2 import (
     get_P_tie_init,
     get_learnable_dynamics_local,
     get_learned_pars_init_list,
-    get_learned_P_tie_init
+    get_learned_P_tie_init,
 )
 from plot_power import plot_power_system_data
 from env_power import PowerSystem
 import pickle
 import datetime
+
+from rldmpc.mpc.mpc_admm import MpcAdmm
+
 
 np.random.seed(1)
 
@@ -34,8 +37,8 @@ CENTRALISED = False
 LEARN = True
 USE_LEARNED_PARAMS = False
 
-STORE_DATA = True
-PLOT = False
+STORE_DATA = False
+PLOT = True
 
 (
     n,
@@ -56,15 +59,9 @@ b_scaling = 0.1  # scale the learnable model offset to prevent instability
 
 # matrices for distributed conensus and ADMM
 G = g_map(Adj)
-eps = 0.25  # must be less than 0.5 as max neighborhood cardinality is 2
-D_in = np.array(
-    [[1, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]
-)  # Hard coded D_in matrix from Adj
-L = D_in - Adj  # graph laplacian
-P = np.eye(n) - eps * L  # consensus matrix
 
 
-class MPCAdmm(Mpc[cs.SX]):
+class LocalMpc(MpcAdmm):
     """MPC for agent inner prob in ADMM."""
 
     rho = 50
@@ -102,15 +99,9 @@ class MPCAdmm(Mpc[cs.SX]):
         # init param vals
 
         self.learnable_pars_init = {}
-        self.fixed_pars_init = {
-            "load": np.zeros((n, 1)),
-            "x_o": np.zeros((n * nx_l, 1)),
-            "u_o": np.zeros((n * nu_l, 1)),
-            "y": np.zeros(
-                (nx_l * (num_neighbours + 1), N)
-            ),  # lagrange multipliers ADMM
-            "z": np.zeros((nx_l * (num_neighbours + 1), N)),  # global consensus vars
-        }
+        self.fixed_pars_init["load"] = np.zeros((n, 1))
+        self.fixed_pars_init["x_o"] = np.zeros((n * nx_l, 1))
+        self.fixed_pars_init["u_o"] = np.zeros((n * nu_l, 1))
 
         # model params
         for name, val in pars_init.items():
@@ -145,22 +136,14 @@ class MPCAdmm(Mpc[cs.SX]):
         Q_x = self.parameter(f"Q_x", (nx_l, nx_l))
         Q_u = self.parameter(f"Q_u", (nu_l, nu_l))
 
-        y = self.parameter("y", (nx_l * (num_neighbours + 1), N))
-        z = self.parameter("z", (nx_l * (num_neighbours + 1), N))
-
         load = self.parameter("load", (1, 1))
         x_o = self.parameter("x_o", (nx_l, 1))
         u_o = self.parameter("u_o", (nu_l, 1))
 
         A, B, L, A_c_list = get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list)
 
-        x, _ = self.state("x", nx_l)  # local state
-        x_c, _, _ = self.variable("x_c", (nx_l * (num_neighbours), N))  # coupling
+        x, x_c = self.augmented_state(num_neighbours, my_index, size=nx_l)
 
-        # adding them together as the full decision var
-        x_cat = cs.vertcat(
-            x_c[: (my_index * nx_l), :], x[:, :-1], x_c[(my_index * nx_l) :, :]
-        )
         u, _ = self.action(
             "u",
             nu_l,
@@ -176,7 +159,6 @@ class MPCAdmm(Mpc[cs.SX]):
             x_c_list.append(x_c[nx_l * i : nx_l * (i + 1), :])
 
         # dynamics - added manually due to coupling
-
         for k in range(N):
             coup = cs.SX.zeros(nx_l, 1)
             for i in range(num_neighbours):  # get coupling expression
@@ -194,7 +176,7 @@ class MPCAdmm(Mpc[cs.SX]):
         self.constraint(f"theta_ub", x[0, 1:], "<=", theta_lim + theta_ub + s)
 
         # objective
-        self.minimize(
+        self.set_local_cost(
             V0
             + sum(
                 f_x.T @ x[:, k]
@@ -207,16 +189,8 @@ class MPCAdmm(Mpc[cs.SX]):
                 )
                 for k in range(N)
             )
-            + sum((y[:, [k]].T @ (x_cat[:, [k]] - z[:, [k]])) for k in range(N))
-            + sum(
-                ((self.rho / 2) * cs.norm_2(x_cat[:, [k]] - z[:, [k]]) ** 2)
-                for k in range(N)
-            )
         )
 
-        self.x_dim = (
-            x_cat.shape
-        )  # assigning it to class so that the dimension can be retreived later by ADMM procedure
         self.nx_l = nx_l
         self.nu_l = nu_l
 
@@ -469,7 +443,7 @@ fixed_dist_parameters_list: list = []
 
 for i in range(n):
     mpc_dist_list.append(
-        MPCAdmm(
+        LocalMpc(
             num_neighbours=len(G[i]) - 1,
             my_index=G[i].index(i),
             pars_init=pars_init_list[i],
@@ -497,15 +471,15 @@ learnable_pars = LearnableParametersDict[cs.SX](
         for name, val in mpc.learnable_pars_init.items()
     )
 )
-ep_len = int(100)
+ep_len = int(20)
 env = MonitorEpisodes(TimeLimit(PowerSystem(), max_episode_steps=int(ep_len)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LoadedLstdQLearningAgentCoordinator(
-            rho=MPCAdmm.rho,
+            rho=LocalMpc.rho,
             n=n,
             G=G,
-            P=P,
+            Adj=Adj,
             centralised_flag=CENTRALISED,
             centralised_debug=False,
             mpc_cent=mpc,
@@ -537,7 +511,7 @@ agent = Log(  # type: ignore[var-annotated]
 )
 
 identifier = "line_40_with_con"
-num_eps = 300
+num_eps = 1
 if LEARN:
     agent.train(env=env, episodes=num_eps, seed=1)
 else:

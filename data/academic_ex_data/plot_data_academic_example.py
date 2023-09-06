@@ -38,15 +38,15 @@ with open(
     B = pickle.load(file)
     A_cs = pickle.load(file)
 
-# reshape data to plot only averages 
+# reshape data to plot only averages
 window_size = 10
 TD_array = np.array(TD)
 TD_reshaped = TD_array.reshape(-1, window_size)
-#TD = np.mean(TD_reshaped, axis=1)  #Plot average of window size
-#TD = pd.Series(TD).rolling(window=window_size).mean()  # Plot moving average
-#x_pnts = np.arange(limit)
-#x_pnts = x_pnts[::window_size]
-#TD = TD[::window_size]  # plot every window_size'th point
+# TD = np.mean(TD_reshaped, axis=1)  #Plot average of window size
+# TD = pd.Series(TD).rolling(window=window_size).mean()  # Plot moving average
+# x_pnts = np.arange(limit)
+# x_pnts = x_pnts[::window_size]
+# TD = TD[::window_size]  # plot every window_size'th point
 
 # plot the results
 _, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)

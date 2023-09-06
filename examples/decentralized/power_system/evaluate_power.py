@@ -37,6 +37,7 @@ STORE_DATA = True
 
 num_scenarios = 100  # number of scenarios for scenario MPC
 
+
 class ScenarioMpc(Mpc[cs.SX]):
     """A simple randomised scenario based MPC."""
 
@@ -275,7 +276,11 @@ if SCENARIO:
     mpc = ScenarioMpc()
 else:
     mpc = LinearMpc()
-agent = Log(LoadedAgent(mpc, fixed_parameters=mpc.fixed_parameter_dict), level=logging.DEBUG, log_frequencies={"on_timestep_end": 1})
+agent = Log(
+    LoadedAgent(mpc, fixed_parameters=mpc.fixed_parameter_dict),
+    level=logging.DEBUG,
+    log_frequencies={"on_timestep_end": 1},
+)
 returns = agent.evaluate(env=env, episodes=num_eps, seed=1)
 
 print(f"Total returns = {sum(returns)}")
@@ -299,16 +304,15 @@ TD_eps = []
 if PLOT:
     plot_power_system_data(TD, R, TD_eps, R_eps, X, U)
 if STORE_DATA:
-        with open(
-            "data/power_eval_S_"
-            + str(SCENARIO)
-            + datetime.datetime.now().strftime("%d%H%M%S%f")
-            + str(".pkl"),
-            "wb",
-        ) as file:
-            pickle.dump(X, file)
-            pickle.dump(U, file)
-            pickle.dump(R, file)
-            pickle.dump(TD, file)
-            pickle.dump(param_dict, file)
-
+    with open(
+        "data/power_eval_S_"
+        + str(SCENARIO)
+        + datetime.datetime.now().strftime("%d%H%M%S%f")
+        + str(".pkl"),
+        "wb",
+    ) as file:
+        pickle.dump(X, file)
+        pickle.dump(U, file)
+        pickle.dump(R, file)
+        pickle.dump(TD, file)
+        pickle.dump(param_dict, file)

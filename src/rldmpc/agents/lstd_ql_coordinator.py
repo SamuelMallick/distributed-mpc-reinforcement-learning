@@ -19,14 +19,16 @@ from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.schedulers import ExponentialScheduler
-
-import matplotlib.pyplot as plt
+from rldmpc.core.admm import AdmmCoordinator
+from rldmpc.core.consensus import ConsensusCoordinator
+from rldmpc.mpc.mpc_admm import MpcAdmm
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
     """Coordinator to handle the communication and learning of a multi-agent q-learning system."""
 
-    iters = 50  # number of iters in ADMM procedure
+    admm_iters = 50
+    consensus_iters = 100
 
     def __init__(
         self,
@@ -36,11 +38,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],
         learnable_parameters: LearnableParametersDict[SymType],
         n: int,
-        mpc_dist_list: list[Mpc[SymType]],
+        mpc_dist_list: list[MpcAdmm[SymType]],
         learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
         fixed_dist_parameters_list: list,
         G: list[list[int]],
-        P: np.ndarray,
+        Adj: np.ndarray,
         rho: float,
         fixed_parameters: Union[
             None, Dict[str, npt.ArrayLike], Collection[Dict[str, npt.ArrayLike]]
@@ -62,9 +64,6 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self.centralised_flag = centralised_flag
         self.centralised_debug = centralised_debug
         self.n = n
-        self.G = G
-        self.P = P
-        self.rho = rho
 
         super().__init__(  # use itself as a learning agent for error checking
             mpc_cent,
@@ -93,7 +92,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     new_exp = deepcopy(exploration)
                     new_exp.reset(i)  # reseting with new seed
                     exploration_list[i] = StepWiseExploration(
-                        new_exp, self.iters, stepwise_decay=False
+                        new_exp, self.admm_iters, stepwise_decay=False
                     )  # step wise to account for ADMM iters
             self.agents: list[LstdQLearningAgent] = []
             for i in range(n):
@@ -128,26 +127,18 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             self.nu_l = mpc_dist_list[
                 0
             ].nu_l  # used to seperate control into each agents
-            self.y_list: list[np.ndarray] = []  # dual vars
-            self.x_temp_list: list[
-                np.ndarray
-            ] = []  # intermediate numerical values for x
-            dual_temp_list: list[np.ndarray] = []  # dual vals of from inner probs
-            for i in range(n):
-                x_dim = mpc_dist_list[i].x_dim
-                self.y_list.append(np.zeros((x_dim[0], x_dim[1])))
-                self.x_temp_list.append(np.zeros(x_dim))
-            self.z = np.zeros(
-                (n * self.nx_l, x_dim[1])
-            )  # all states of all agents stacked, along horizon
 
-            # generate slices of z for each agent
-            z_slices: list[list[int]] = []
-            for i in range(n):
-                z_slices.append([])
-                for j in self.G[i]:
-                    z_slices[i] += list(np.arange(self.nx_l * j, self.nx_l * (j + 1)))
-            self.z_slices = z_slices
+            self.admm_coordinator = AdmmCoordinator(
+                self.agents,
+                G,
+                N=mpc_cent.horizon,
+                nx_l=self.nx_l,
+                nu_l=self.nu_l,
+                rho=rho,
+                iters=self.admm_iters,
+            )
+
+            self.consensus_coordinator = ConsensusCoordinator(Adj, self.consensus_iters)
 
     # need to override train method to manually reset all agent MPCs and NOT activate updates for centralised
     def train(
@@ -328,12 +319,17 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 # Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
                 V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
                 Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
-                V_f = self.consensus(V_f_vec)[0] * len(self.agents)
-                Q_f = self.consensus(Q_f_vec)[0] * len(self.agents)
+                V_f = self.consensus_coordinator.average_consensus(V_f_vec)[0] * len(
+                    self.agents
+                )
+                Q_f = self.consensus_coordinator.average_consensus(Q_f_vec)[0] * len(
+                    self.agents
+                )
                 if dist_costs is not None:
-                    cost_f = self.consensus(np.asarray(dist_costs))[0] * len(
-                        self.agents
+                    av_cost = self.consensus_coordinator.average_consensus(
+                        np.asarray(dist_costs)
                     )
+                    cost_f = av_cost[0] * len(self.agents)
                 else:
                     cost_f = cost
                 for i in range(len(self.agents)):  # store experience for agents
@@ -363,113 +359,23 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             return rewards
 
     def distributed_state_value(self, state, episode, raises, deterministic):
-        local_action_list, local_sol_list, error_flag = self.admm(
-            state, episode, raises, deterministic=deterministic
-        )
+        # local_action_list, local_sol_list, error_flag = self.admm(
+        #    state, episode, raises, deterministic=deterministic
+        # )
+        (
+            local_action_list,
+            local_sol_list,
+            error_flag,
+        ) = self.admm_coordinator.solve_admm(state, deterministic=deterministic)
         if not error_flag:
             return cs.DM(local_action_list), local_sol_list, error_flag
         else:
             return None, local_sol_list, error_flag
 
     def distributed_action_value(self, state, action, episode, raises):
-        local_action_list, local_sol_list, error_flag = self.admm(
-            state, episode, raises, action=action
-        )
-        return local_sol_list, error_flag
-
-    def admm(self, state, episode, raises, action=None, deterministic=False):
-        """Uses ADMM to solve distributed problem. If actions passed, solves state-action val."""
-        loc_action_list = [None] * len(self.agents)
-        local_sol_list = [None] * len(self.agents)
-
-        plot_list = []
-
-        for iter in range(self.iters):
-            for i in range(len(self.agents)):  # x-update TODO parallelise
-                loc_state = state[
-                    self.nx_l * i : self.nx_l * (i + 1), :
-                ]  # get local state from global
-
-                # set fixed vars
-                self.agents[i].fixed_parameters["y"] = self.y_list[i]
-                self.agents[i].fixed_parameters["z"] = self.z[
-                    self.z_slices[i], :
-                ]  # only pass global vars that are relevant to agent
-
-                if action is None:
-                    loc_action_list[i], local_sol_list[i] = self.agents[i].state_value(
-                        loc_state, deterministic
-                    )
-                else:
-                    loc_action = action[self.nu_l * i : self.nu_l * (i + 1), :]
-                    local_sol_list[i] = self.agents[i].action_value(
-                        loc_state, loc_action
-                    )
-                if not local_sol_list[i].success:
-                    # self.agents[i].on_mpc_failure(
-                    #    episode, None, local_sol_list[i].status, raises
-                    # )
-                    return (
-                        loc_action_list,
-                        local_sol_list,
-                        True,
-                    )  # return with error flag as true
-
-                idx = self.G[i].index(i) * self.nx_l
-                self.x_temp_list[i] = cs.vertcat(  # insert local state into place
-                    local_sol_list[i].vals["x_c"][:idx, :],
-                    local_sol_list[i].vals["x"][:, :-1],
-                    local_sol_list[i].vals["x_c"][idx:, :],
-                )
-            # plot_list.append(loc_solV[0].vals["x"])
-            # z update -> essentially an averaging of all agents' optinions on each z
-            for i in range(len(self.agents)):  # loop through each agents associated z
-                count = 0
-                sum = np.zeros((self.nx_l, self.z.shape[1]))
-                for j in range(
-                    len(self.agents)
-                ):  # loop through agents who have opinion on this z
-                    if i in self.G[j]:
-                        count += 1
-                        x_slice = slice(
-                            self.nx_l * self.G[j].index(i),
-                            self.nx_l * (self.G[j].index(i) + 1),
-                        )
-                        sum += self.x_temp_list[j][x_slice, :]
-                self.z[self.nx_l * i : self.nx_l * (i + 1), :] = sum / count
-
-            # plot_list.append(local_sol_list[2].vals["u"])
-            # plot_list.append(self.x_temp_list[2] - self.z[self.z_slices[2], :])
-            plot_list.append(self.x_temp_list[0])
-            # plot_list.append(self.z[self.z_slices[0], :])
-
-            # y update TODO parallelise
-            for i in range(len(self.agents)):
-                self.y_list[i] = self.y_list[i] + self.rho * (
-                    self.x_temp_list[i] - self.z[self.z_slices[i], :]
-                )
-
-        # plot_list = np.asarray(plot_list)
-        # plt.plot(plot_list[:, :, 0])
-        # plt.show()
-
-        return (
-            loc_action_list,
+        (
+            local_action_list,
             local_sol_list,
-            False,
-        )  # return last solutions with error flag as false
-
-    def consensus(self, x):
-        """Runs the average consensus algorithm on the vector x"""
-        x = x.reshape(self.n, 1)
-        iters = 100  # number of consensus iters
-        for iter in range(iters):
-            x = self.P @ x
-        return x
-
-    def reset_admm_params(self):
-        """Reset all vars for admm to zero."""
-        for i in range(len(self.agents)):
-            self.y_list[i][:] = 0
-            self.x_temp_list[i][:] = 0
-        self.z[:] = 0
+            error_flag,
+        ) = self.admm_coordinator.solve_admm(state, action=action)
+        return local_sol_list, error_flag
