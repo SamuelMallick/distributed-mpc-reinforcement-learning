@@ -12,8 +12,6 @@ import logging
 from rldmpc.mpc.mpc_admm import MpcAdmm
 import matplotlib.pyplot as plt
 
-ADMM_DEBUG_PLOT = False
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 console_handler = logging.StreamHandler()
@@ -23,11 +21,11 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
-
-class GAdmmCoordinator(Agent):
-    """Coordinates the greedy ADMM algorithm for PWA agents"""
+class SqpAdmmCoordinator(Agent):
+    """Coordinates the SQP-ADMM algorithm for PWA agents"""
 
     admm_iters = 50
+    eps = 1e-6  # threshold for comparing differences in costs
 
     def __init__(
         self,
@@ -85,7 +83,7 @@ class GAdmmCoordinator(Agent):
             self.nx_l,
             self.nu_l,
             rho,
-            iters=1,
+            iters=self.admm_iters,
         )
 
     def evaluate(
@@ -110,7 +108,7 @@ class GAdmmCoordinator(Agent):
                 agent.on_episode_start(env, episode)
 
             while not (truncated or terminated):
-                action, sol_list = self.g_admm_control(state, deterministic)
+                action, sol_list = self.sqp_admm_control(state, deterministic)
                 for i in range(len(sol_list)):
                     if not sol_list[i].success:
                         self.agents[i].on_mpc_failure(
@@ -133,13 +131,11 @@ class GAdmmCoordinator(Agent):
             agent.on_validation_end(env, returns)
         return returns
 
-    def g_admm_control(self, state, deterministic):
-        seqs = [[0] * self.N for i in range(self.n)]  # switching seqs for agents
-
-        xc = [None] * self.n
-
+    def sqp_admm_control(self, state, deterministic):
         # break global state into local pieces
         x = [state[self.nx_l * i : self.nx_l * (i + 1), :] for i in range(self.n)]
+
+        xc = [None] * self.n
 
         # initial feasible control guess
         u = [np.zeros((self.nu_l, self.N)) for i in range(self.n)]
@@ -147,63 +143,92 @@ class GAdmmCoordinator(Agent):
         # generate initial feasible coupling via dynamics rollout
         x_rout = self.dynamics_rollout(x, u)
 
-        if ADMM_DEBUG_PLOT:  # store control at each iter to plot ADMM convergence
-            u_plot_list = [
-                np.zeros((self.nu_l, self.admm_iters)) for i in range(self.n)
-            ]
-            switch_plot_list = [[] for i in range(self.n)]
+        continue_flag = True
+        first_iter_flag = True
 
-        for iter in range(self.admm_iters):
-            logger.debug(f"Greedy admm iter {iter}")
-            # generate local sequences and choose one  - CHOICE: this can be done with vars from local output of ADMM
-            # which may not have converged to consensus - therefore adding exploration OR a cooperative
-            # dynamics rollout as before the loop
+        logger.debug("new sqp iter")
+
+        while continue_flag:
+            continue_flag = False
+
+            seqs = [None] * self.n
+
+            # generate sequences for all agents
             for i in range(self.n):
-                if iter == 0:  # first iter we must used rolled out state
-                    new_seqs = self.agents[i].eval_sequences(
+                if first_iter_flag:
+                    seqs[i] = self.agents[i].eval_sequences(
                         x[i],
                         u[i],
                         [x_rout[j] for j in range(self.n) if self.Adj[i, j] == 1],
                     )
-                    seqs[i] = new_seqs[0]  # use first by default for first iter
+
+                    # first iter flag changed below
+
                 else:
-                    new_seqs = self.agents[i].eval_sequences(
+                    seqs[i] = self.agents[i].eval_sequences(
                         x[i],
                         u[i],
                         xc[i],  # use local ADMM vars if not first iter
                     )
 
-                    if seqs[i] in new_seqs:
-                        new_seqs.remove(seqs[i])
-                    if len(new_seqs) > 0:
-                        logger.debug(f"Agent {i} switched: {seqs[i]} to {new_seqs[0]}")
-                        seqs[i] = new_seqs[0]  # for now choosing arbritrarily first
+            logger.debug(f"Sequences: {seqs}")
+            
+            # set up coordinated enumeration of sequences
 
-                        if ADMM_DEBUG_PLOT:
-                            switch_plot_list[i].append(iter)
-                # set sequences
-                self.agents[i].set_sequence(seqs[i])
-
-            # perform ADMM step
-            action_list, sol_list, error_flag = self.admm_coordinator.solve_admm(state)
-
-            if ADMM_DEBUG_PLOT:
-                for i in range(self.n):
-                    u_plot_list[i][:, iter] = np.asarray(action_list[i])
-            # extract the vars across the horizon from the ADMM sol for each agent
+            # contains the numbers of sequences to enumerate before agents should switch sequence
+            cue_list = [None]*self.n    
+            # contains the current indexes for sequences
+            index_list = [None]*self.n
             for i in range(self.n):
-                u[i] = np.asarray(sol_list[i].vals["u"])
-                xc_out = np.asarray(sol_list[i].vals["x_c"])
-                xc_temp = []
-                for j in range(self.agents[i].num_neighbours):
-                    xc_temp.append(xc_out[self.nx_l * j : self.nx_l * (j + 1), :])
-                xc[i] = xc_temp
+                index_list[i] = 0
+                temp_val = 1
+                for j in range(i):
+                    temp_val *= len(seqs[j])
+                cue_list[i] = temp_val
 
-        if ADMM_DEBUG_PLOT:
-            self.plot_admm_iters(u_plot_list, switch_plot_list)
+            num_seqs = cue_list[-1]*len(seqs[-1])
+            counter = 1
 
-        return cs.DM(action_list), sol_list
+            while counter <= num_seqs:
+                for i in range(self.n):
+                    self.agents[i].set_sequence(seqs[i][index_list[i]])
 
+                # solve current sequence choice
+                action_list, sol_list, error_flag = self.admm_coordinator.solve_admm(state)
+                cost_temp = sum(sol_list[i].f for i in range(self.n))
+                if first_iter_flag or cost_opt - cost_temp > self.eps:
+                    if not first_iter_flag:
+                        logger.debug(f"cost decreased by: {cost_opt - cost_temp}")
+
+                    cost_opt = cost_temp
+                    # extract vars over horizon
+                    for i in range(self.n):
+                        u[i] = np.asarray(sol_list[i].vals["u"])
+                        xc_out = np.asarray(sol_list[i].vals["x_c"])
+                        xc_temp = []
+                        for j in range(self.agents[i].num_neighbours):
+                            xc_temp.append(xc_out[self.nx_l * j : self.nx_l * (j + 1), :])
+                        xc[i] = xc_temp
+                        action_list_opt = action_list
+
+                    if first_iter_flag:
+                        first_iter_flag = False
+                    
+                    continue_flag = True
+
+                    # break the loop at first improvement (taking first descent direction)
+                    break
+        
+                
+                # increment the enumeration of sequences
+                for i in range(self.n):
+                    if counter%cue_list[i] == 0:
+                        index_list[i] = (index_list[i]+1)%len(seqs[i])
+            
+                counter += 1
+
+        return cs.DM(action_list_opt), sol_list
+    
     def dynamics_rollout(self, x: List[np.ndarray], u: List[np.ndarray]):
         """For a given state and u, rollout the agents' dynamics step by step."""
         x_temp = [np.zeros((self.nx_l, self.N)) for i in range(self.n)]
@@ -220,10 +245,3 @@ class GAdmmCoordinator(Agent):
                     x_temp[i][:, [k - 1]], u[i][:, [k]], xc_temp
                 )
         return x_temp
-
-    def plot_admm_iters(self, u_list, switch_list):
-        _, axs = plt.subplots(len(u_list), 1, constrained_layout=True, sharex=True)
-        for i in range(len(u_list)):
-            axs[i].plot(u_list[i].T)
-            axs[i].plot(switch_list[i], u_list[i][:, switch_list[i]].squeeze(), "o")
-        plt.show()

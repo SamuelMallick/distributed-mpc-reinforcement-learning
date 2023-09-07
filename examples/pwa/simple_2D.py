@@ -12,6 +12,7 @@ from gymnasium.wrappers import TimeLimit
 from mpcrl.wrappers.agents import Log, RecordUpdates
 import logging
 from rldmpc.agents.mld_agent import MldAgent
+from rldmpc.agents.sqp_admm_coordinator import SqpAdmmCoordinator
 from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.core.admm import g_map
 from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
@@ -21,7 +22,7 @@ from rldmpc.mpc.mpc_mld import MpcMld
 from rldmpc.mpc.mpc_switching import MpcSwitching
 from rldmpc.utils.pwa_models import cent_from_dist
 
-SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm"
+SIM_TYPE = "sqp_admm"  # options: "mld", "g_admm", "sqp_admm"
 
 # create system
 
@@ -217,6 +218,20 @@ elif SIM_TYPE == "g_admm":
     # coordinator
     agent = Log(
         GAdmmCoordinator(
+            local_mpcs,
+            local_fixed_dist_parameters,
+            systems,
+            G_map,
+            Adj,
+            local_mpcs[0].rho,
+        ),
+        level=logging.DEBUG,
+        log_frequencies={"on_timestep_end": 200},
+    )
+elif SIM_TYPE == "sqp_admm":
+    # coordinator
+    agent = Log(
+        SqpAdmmCoordinator(
             local_mpcs,
             local_fixed_dist_parameters,
             systems,

@@ -70,7 +70,7 @@ class MldAgent(Agent):
             while not (truncated or terminated):
                 # changed origonal agents evaluate here to use the mld mpc
                 action = self.mpc.solve_mpc(state)
-                action = cs.DM(action)  
+                action = cs.DM(action)
 
                 state, r, truncated, terminated, _ = env.step(action)
                 self.on_env_step(env, episode, timestep)

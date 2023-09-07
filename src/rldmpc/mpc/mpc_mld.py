@@ -4,11 +4,13 @@ from csnlp.wrappers import Mpc
 import gurobipy as gp
 import logging
 
-logging.basicConfig(
-    level=logging.CRITICAL,  # Set the logging level to control verbosity
-    format="%(asctime)s [%(levelname)s]: %(message)s",
-    handlers=[logging.StreamHandler()],  # Log to the console
-)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.CRITICAL)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.CRITICAL) 
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 
 class MpcMld:
@@ -61,7 +63,7 @@ class MpcMld:
                 model_lin.update()
                 model_lin.optimize()
                 M_st[i][j, 0] = model_lin.ObjVal
-        logging.info("Solved linear model for PWA region bounds, M_star = " + str(M_st))
+        logger.info("Solved linear model for PWA region bounds, M_star = " + str(M_st))
 
         # bounds for state updates
 
@@ -82,7 +84,7 @@ class MpcMld:
                 m_regions[i] = model_lin.ObjVal
             M_ub[j] = np.max(M_regions)
             m_lb[j] = np.min(m_regions)
-        logging.info(
+        logger.info(
             "Solved linear model for PWA state update bounds, M = "
             + str(M_ub.T)
             + "', m = "
@@ -198,7 +200,7 @@ class MpcMld:
         self.m = m
         self.N = N
 
-        logging.info("MLD MPC setup complete.")
+        logger.info("MLD MPC setup complete.")
 
     def set_cost(self, Q_x, Q_u):
         """Set cost of the MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
@@ -220,7 +222,7 @@ class MpcMld:
             u = self.u.X
         else:
             u = np.zeros((self.m, self.N))
-            logging.info("Infeasible")
+            logger.info("Infeasible")
         runtime = self.mpc_model.Runtime
         node_count = self.mpc_model.NodeCount
         return u[:, [0]]
