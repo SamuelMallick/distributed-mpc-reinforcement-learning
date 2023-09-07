@@ -11,12 +11,19 @@ from mpcrl.wrappers.envs import MonitorEpisodes
 from gymnasium.wrappers import TimeLimit
 from mpcrl.wrappers.agents import Log, RecordUpdates
 import logging
+from rldmpc.agents.mld_agent import MldAgent
 from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.core.admm import g_map
 from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
 import matplotlib.pyplot as plt
+from rldmpc.mpc.mpc_mld import MpcMld
 
 from rldmpc.mpc.mpc_switching import MpcSwitching
+from rldmpc.utils.pwa_models import cent_from_dist
+
+SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm"
+
+# create system
 
 n = 3  # number of agents
 nx_l = 2
@@ -63,9 +70,11 @@ for i in range(n):
     ):  # duplicate it for each PWA region, as for this PWA system the coupling matrices do not change
         systems[i]["Ac"] = systems[i]["Ac"] + [Ac_i]
 
+cent_system = cent_from_dist(systems, Adj)
+
 Q_x_l = np.eye(nx_l)
 Q_u_l = 0.1 * np.eye(nu_l)
-N = 5
+N = 10
 
 Q_x = block_diag(*([Q_x_l] * n))
 Q_u = block_diag(*([Q_u_l] * n))
@@ -99,6 +108,7 @@ class LtiSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         self, action: cs.DM
     ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
         """Steps the LTI system."""
+
         action = action.full()
         x_new = np.zeros((nx_l * n, 1))
         for i in range(n):
@@ -194,17 +204,29 @@ for i in range(n):
     )
     local_fixed_dist_parameters.append(local_mpcs[i].fixed_pars_init)
 
+# mld mpc
+mld_mpc = MpcMld(cent_system, N)
+mld_mpc.set_cost(Q_x, Q_u)
+
 # env
 env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20)))
 
-# coordinator
-agent = Log(
-    GAdmmCoordinator(
-        local_mpcs, local_fixed_dist_parameters, systems, G_map, Adj, local_mpcs[0].rho
-    ),
-    level=logging.DEBUG,
-    log_frequencies={"on_timestep_end": 200},
-)
+if SIM_TYPE == "mld":
+    agent = MldAgent(mld_mpc)
+elif SIM_TYPE == "g_admm":
+    # coordinator
+    agent = Log(
+        GAdmmCoordinator(
+            local_mpcs,
+            local_fixed_dist_parameters,
+            systems,
+            G_map,
+            Adj,
+            local_mpcs[0].rho,
+        ),
+        level=logging.DEBUG,
+        log_frequencies={"on_timestep_end": 200},
+    )
 
 agent.evaluate(env=env, episodes=1, seed=1)
 
@@ -217,6 +239,8 @@ else:
     X = np.squeeze(env.ep_observations)
     U = np.squeeze(env.ep_actions)
     R = np.squeeze(env.ep_rewards)
+
+print(f"Return = {sum(R.squeeze())}")
 
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
 axs[0].plot(X[:, [0, 2, 4]])

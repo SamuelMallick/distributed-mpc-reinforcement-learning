@@ -36,10 +36,8 @@ class PwaAgent(Agent[SymType]):
             values. Use this to specify fixed parameters, that is, non-learnable. If
             `None`, then no fixed parameter is assumed.
         pwa_system: dict
-            Contains {S, R, T, A, B, c, D, E, F, G, [Ac_j]}, where each is a list of matrices defining dynamics.
+            Contains {S, R, T, A, B, c, [Ac_j]}, where each is a list of matrices defining dynamics.
             When the inequality S[i]x + R[i]u <= T[i] is true, the dynamics are x^+ = A[i]x + B[i]u + c[i] + sum_j Ac_j[i] x_j.
-            State constraints are: Dx <= E.
-            Control constraints are: Fu <= G.
         warmstart: 'last' or 'last-successful', optional
             The warmstart strategy for the MPC's NLP. If 'last-successful', the last
             successful solution is used to warm start the solver for the next iteration.
@@ -54,10 +52,6 @@ class PwaAgent(Agent[SymType]):
         self.A = pwa_system["A"]
         self.B = pwa_system["B"]
         self.c = pwa_system["c"]
-        self.D = pwa_system["D"]
-        self.E = pwa_system["E"]
-        self.F = pwa_system["F"]
-        self.G = pwa_system["G"]
         self.Ac = pwa_system["Ac"]
 
         self.num_neighbours = len(self.Ac[0])
@@ -65,7 +59,8 @@ class PwaAgent(Agent[SymType]):
     def next_state(self, x: np.ndarray, u: np.ndarray, xc: List[np.ndarray] = None):
         """Increment the dynamics as x+ = A[i]x + B[i]u + c[i] + sum_j Ac[i]_j xc_j
         if S[i]x + R[i]u <= T.
-        If the coupled states xc are not passed the coupling part of dynamics is ignored."""
+        If the coupled states xc are not passed the coupling part of dynamics is ignored.
+        """
         for i in range(len(self.S)):
             if all(self.S[i] @ x + self.R[i] @ u <= self.T[i]):
                 if xc is None:
@@ -133,6 +128,6 @@ class PwaAgent(Agent[SymType]):
             self.fixed_parameters[f"c_{i}"] = self.c[s[i]]
             self.fixed_parameters[f"S_{i}"] = self.S[s[i]]
             self.fixed_parameters[f"R_{i}"] = self.R[s[i]]
-            self.fixed_parameters[f"T_{i}"] = self.T[s[i]]  
+            self.fixed_parameters[f"T_{i}"] = self.T[s[i]]
             for j in range(self.num_neighbours):
                 self.fixed_parameters[f"Ac_{i}_{j}"] = self.Ac[s[i]][j]

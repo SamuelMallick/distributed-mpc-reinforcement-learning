@@ -65,9 +65,21 @@ def get_P_tie():
     return P_tie
 
 
-def get_model_details() -> Tuple[
-    int, int, int, np.ndarray, float, int, float, np.ndarray, float, np.ndarray, float
-]:
+def get_model_details() -> (
+    Tuple[
+        int,
+        int,
+        int,
+        np.ndarray,
+        float,
+        int,
+        float,
+        np.ndarray,
+        float,
+        np.ndarray,
+        float,
+    ]
+):
     return (
         n,
         nx_l,
