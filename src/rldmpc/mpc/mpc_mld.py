@@ -7,8 +7,8 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.CRITICAL)
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.CRITICAL) 
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setLevel(logging.CRITICAL)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
@@ -202,17 +202,23 @@ class MpcMld:
 
         logger.info("MLD MPC setup complete.")
 
-    def set_cost(self, Q_x, Q_u):
+    def set_cost(self, Q_x, Q_u, x_goal=None, u_goal=None):
         """Set cost of the MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
-        Restricted to quadratic in the states and control."""
+        Restricted to quadratic in the states and control.
+        If x_goal or u_goal passed the cost uses (x-x_goal) and (u_goal)"""
+
+        # construct zero goal points if not passed
+        if x_goal is None:
+            x_goal = np.zeros(self.x[:, [0]].shape)
+        if u_goal is None:
+            u_goal = np.zeros(self.u[:, [0]].shape)
 
         obj = 0
         for k in range(self.N):
-            obj += (
-                self.x[:, k] @ Q_x @ self.x[:, [k]]
-                + self.u[:, k] @ Q_u @ self.u[:, [k]]
-            )
-        obj += self.x[:, self.N] @ Q_x @ self.x[:, [self.N]]
+            obj += (self.x[:, k] - x_goal.T) @ Q_x @ (self.x[:, [k]] - x_goal) + (
+                self.u[:, k] - u_goal.T
+            ) @ Q_u @ (self.u[:, [k]] - u_goal)
+        obj += (self.x[:, k] - x_goal.T) @ Q_x @ (self.x[:, [k]] - x_goal)
         self.mpc_model.setObjective(obj, gp.GRB.MINIMIZE)
 
     def solve_mpc(self, state):

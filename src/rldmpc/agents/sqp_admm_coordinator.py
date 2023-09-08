@@ -15,8 +15,8 @@ import matplotlib.pyplot as plt
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.DEBUG) 
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
@@ -172,13 +172,13 @@ class SqpAdmmCoordinator(Agent):
                     )
 
             logger.debug(f"Sequences: {seqs}")
-            
+
             # set up coordinated enumeration of sequences
 
             # contains the numbers of sequences to enumerate before agents should switch sequence
-            cue_list = [None]*self.n    
+            cue_list = [None] * self.n
             # contains the current indexes for sequences
-            index_list = [None]*self.n
+            index_list = [None] * self.n
             for i in range(self.n):
                 index_list[i] = 0
                 temp_val = 1
@@ -186,7 +186,7 @@ class SqpAdmmCoordinator(Agent):
                     temp_val *= len(seqs[j])
                 cue_list[i] = temp_val
 
-            num_seqs = cue_list[-1]*len(seqs[-1])
+            num_seqs = cue_list[-1] * len(seqs[-1])
             counter = 1
 
             while counter <= num_seqs:
@@ -194,7 +194,9 @@ class SqpAdmmCoordinator(Agent):
                     self.agents[i].set_sequence(seqs[i][index_list[i]])
 
                 # solve current sequence choice
-                action_list, sol_list, error_flag = self.admm_coordinator.solve_admm(state)
+                action_list, sol_list, error_flag = self.admm_coordinator.solve_admm(
+                    state
+                )
                 cost_temp = sum(sol_list[i].f for i in range(self.n))
                 if first_iter_flag or cost_opt - cost_temp > self.eps:
                     if not first_iter_flag:
@@ -207,28 +209,29 @@ class SqpAdmmCoordinator(Agent):
                         xc_out = np.asarray(sol_list[i].vals["x_c"])
                         xc_temp = []
                         for j in range(self.agents[i].num_neighbours):
-                            xc_temp.append(xc_out[self.nx_l * j : self.nx_l * (j + 1), :])
+                            xc_temp.append(
+                                xc_out[self.nx_l * j : self.nx_l * (j + 1), :]
+                            )
                         xc[i] = xc_temp
                         action_list_opt = action_list
 
                     if first_iter_flag:
                         first_iter_flag = False
-                    
+
                     continue_flag = True
 
                     # break the loop at first improvement (taking first descent direction)
                     break
-        
-                
+
                 # increment the enumeration of sequences
                 for i in range(self.n):
-                    if counter%cue_list[i] == 0:
-                        index_list[i] = (index_list[i]+1)%len(seqs[i])
-            
+                    if counter % cue_list[i] == 0:
+                        index_list[i] = (index_list[i] + 1) % len(seqs[i])
+
                 counter += 1
 
         return cs.DM(action_list_opt), sol_list
-    
+
     def dynamics_rollout(self, x: List[np.ndarray], u: List[np.ndarray]):
         """For a given state and u, rollout the agents' dynamics step by step."""
         x_temp = [np.zeros((self.nx_l, self.N)) for i in range(self.n)]
