@@ -11,6 +11,7 @@ from mpcrl.wrappers.envs import MonitorEpisodes
 from gymnasium.wrappers import TimeLimit
 from mpcrl.wrappers.agents import Log, RecordUpdates
 import logging
+from rldmpc.agents.decent_mld_coordinator import DecentMldCoordinator
 from rldmpc.agents.mld_agent import MldAgent
 from rldmpc.agents.sqp_admm_coordinator import SqpAdmmCoordinator
 from rldmpc.mpc.mpc_admm import MpcAdmm
@@ -25,9 +26,9 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(0)
 
-SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm"
+SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm", "decent_mld"
 
-n = 3  # num cars
+n = 2  # num cars
 Adj = np.zeros((n, n))  # adjacency matrix
 for i in range(n):  # make it chain coupling
     if i == 0:
@@ -318,6 +319,41 @@ class TrackingMldAgent(MldAgent):
         return super().on_timestep_end(env, episode, timestep)
 
 
+class TrackingDecentMldCoordinator(DecentMldCoordinator):
+    # current state of car to be tracked is observed and propogated forward
+    # to be the prediction
+    def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
+        self.observe_states(timestep)
+        return super().on_timestep_end(env, episode, timestep)
+
+    def on_episode_start(self, env: Env, episode: int) -> None:
+        self.observe_states(timestep=0)
+        return super().on_episode_start(env, episode)
+
+    def observe_states(self, timestep):
+        for i in range(n):
+            x_goal = [None] * N
+            predicted_pos = np.zeros((1, N))
+            predicted_vel = np.zeros((1, N))
+            if i == 0:  # lead car
+                predicted_pos[:, [0]] = leader_state[0, [timestep]]
+                predicted_vel[:, [0]] = leader_state[1, [timestep]]
+            else:
+                predicted_pos[:, [0]] = env.x[nx_l * (i - 1), :]
+                predicted_vel[:, [0]] = env.x[nx_l * (i - 1) + 1, :]
+            for k in range(N - 1):
+                predicted_pos[:, [k + 1]] = (
+                    predicted_pos[:, [k]] + acc.ts * predicted_vel[:, [k]]
+                )
+                predicted_vel[:, [k + 1]] = predicted_vel[:, [k]]
+                x_goal[k] = np.vstack([predicted_pos[:, [k]], predicted_vel[:, [k]]]) + sep
+            x_goal[N - 1] = np.vstack(
+                [predicted_pos[:, [N - 1]], predicted_vel[:, [N - 1]]]
+            )
+
+            self.agents[i].set_cost(Q_x_l, Q_u_l, x_goal=x_goal)
+
+
 # env
 env = MonitorEpisodes(TimeLimit(CarFleet(), max_episode_steps=ep_len))
 if SIM_TYPE == "mld":
@@ -357,9 +393,14 @@ elif SIM_TYPE == "g_admm":
         level=logging.DEBUG,
         log_frequencies={"on_timestep_end": 200},
     )
-elif SIM_TYPE == "sqp_admm":
+elif SIM_TYPE == "decent_mld":
     # coordinator
-    pass
+    local_mpcs: list[MpcMld] = []
+    for i in range(n):
+        # passing local system
+        local_mpcs.append(MpcMld(system, N))
+    agent = TrackingDecentMldCoordinator(local_mpcs, nx_l, nu_l)
+
 
 agent.evaluate(env=env, episodes=1, seed=1)
 

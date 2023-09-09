@@ -69,7 +69,7 @@ class MldAgent(Agent):
 
             while not (truncated or terminated):
                 # changed origonal agents evaluate here to use the mld mpc
-                action = self.mpc.solve_mpc(state)
+                action = self.get_control(state)
                 action = cs.DM(action)
 
                 state, r, truncated, terminated, _ = env.step(action)
@@ -83,6 +83,9 @@ class MldAgent(Agent):
 
         self.on_validation_end(env, returns)
         return returns
+
+    def get_control(self, state):
+        return self.mpc.solve_mpc(state)
 
     def set_cost(
         self, Q_x, Q_u, x_goal: List[np.ndarray] = None, u_goal: List[np.ndarray] = None
