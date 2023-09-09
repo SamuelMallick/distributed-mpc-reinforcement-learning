@@ -10,6 +10,8 @@ class PwaAgent(Agent[SymType]):
     """An agent who has knowledge of it's own PWA dynamics and can use this to do things such as
     identify PWA regions given state and control trajectories."""
 
+    buffer = 1e-7   # buffer for checking boundaries of PWA regions
+
     def __init__(
         self,
         mpc: Mpc,
@@ -62,7 +64,7 @@ class PwaAgent(Agent[SymType]):
         If the coupled states xc are not passed the coupling part of dynamics is ignored.
         """
         for i in range(len(self.S)):
-            if all(self.S[i] @ x + self.R[i] @ u <= self.T[i]):
+            if all(self.S[i] @ x + self.R[i] @ u <= self.T[i] + self.buffer):
                 if xc is None:
                     return self.A[i] @ x + self.B[i] @ u + self.c[i]
                 else:
