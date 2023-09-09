@@ -10,7 +10,7 @@ from rldmpc.utils.discretisation import forward_euler
 class ACC:
     nx_l = 2  # dimension of local state
     nu_l = 1  # dimension of local control
-    ts = 0.5  # time step size for discretisation
+    ts = 1  # time step size for discretisation
 
     mass = 800  # mass
     c_fric = 0.5  # viscous friction coefficient

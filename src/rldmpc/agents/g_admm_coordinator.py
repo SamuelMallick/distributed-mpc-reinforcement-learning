@@ -138,7 +138,7 @@ class GAdmmCoordinator(Agent):
             self.on_episode_end(env, episode, returns[episode])
             for agent in self.agents:
                 agent.on_episode_end(env, episode, returns[episode])
-        
+
         self.on_validation_end(env, returns)
         for agent in self.agents:
             agent.on_validation_end(env, returns)
@@ -148,12 +148,14 @@ class GAdmmCoordinator(Agent):
         seqs = [[0] * self.N for i in range(self.n)]  # switching seqs for agents
 
         xc = [None] * self.n
+        x_pred = [None] * self.n
 
         # break global state into local pieces
         x = [state[self.nx_l * i : self.nx_l * (i + 1), :] for i in range(self.n)]
 
         # TODO initial feasible control guess
-        u = self.warm_start
+        # u = self.warm_start
+        u = [np.ones((self.nu_l, self.N)) for i in range(self.n)]
 
         # generate initial feasible coupling via dynamics rollout
         x_rout = self.dynamics_rollout(x, u)
@@ -205,6 +207,7 @@ class GAdmmCoordinator(Agent):
             # extract the vars across the horizon from the ADMM sol for each agent
             for i in range(self.n):
                 u[i] = np.asarray(sol_list[i].vals["u"])
+                x_pred[i] = np.asarray(sol_list[i].vals["x"])
                 xc_out = np.asarray(sol_list[i].vals["x_c"])
                 xc_temp = []
                 for j in range(self.agents[i].num_neighbours):
@@ -215,7 +218,8 @@ class GAdmmCoordinator(Agent):
             self.plot_admm_iters(u_plot_list, switch_plot_list)
 
         # store solution for next warm start
-        for i in range(self.n): self.warm_start[i] = u[i]
+        # for i in range(self.n):
+        # self.warm_start[i] = u[i]
 
         return cs.DM(action_list), sol_list
 

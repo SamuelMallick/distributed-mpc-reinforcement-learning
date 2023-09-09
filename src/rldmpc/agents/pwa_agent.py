@@ -10,7 +10,7 @@ class PwaAgent(Agent[SymType]):
     """An agent who has knowledge of it's own PWA dynamics and can use this to do things such as
     identify PWA regions given state and control trajectories."""
 
-    buffer = 1e-7   # buffer for checking boundaries of PWA regions
+    buffer = 1e-7  # buffer for checking boundaries of PWA regions
 
     def __init__(
         self,
