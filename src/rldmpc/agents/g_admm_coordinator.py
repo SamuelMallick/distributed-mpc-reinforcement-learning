@@ -76,6 +76,9 @@ class GAdmmCoordinator(Agent):
         self.nx_l = local_mpcs[0].nx_l
         self.nu_l = local_mpcs[0].nu_l
 
+        # previous time_steps solution stored in warm start
+        self.warm_start = [np.zeros((self.nu_l, self.N)) for i in range(self.n)]
+
         # coordinator of ADMM using 1 iteration as g_admm coordinator checks sequences every ADMM iter
         self.admm_coordinator = AdmmCoordinator(
             self.agents,
@@ -149,8 +152,8 @@ class GAdmmCoordinator(Agent):
         # break global state into local pieces
         x = [state[self.nx_l * i : self.nx_l * (i + 1), :] for i in range(self.n)]
 
-        # initial feasible control guess
-        u = [np.zeros((self.nu_l, self.N)) for i in range(self.n)]
+        # TODO initial feasible control guess
+        u = self.warm_start
 
         # generate initial feasible coupling via dynamics rollout
         x_rout = self.dynamics_rollout(x, u)
@@ -174,6 +177,7 @@ class GAdmmCoordinator(Agent):
                         [x_rout[j] for j in range(self.n) if self.Adj[i, j] == 1],
                     )
                     seqs[i] = new_seqs[0]  # use first by default for first iter
+                    logger.debug(f"Agent {i} initial sez: {seqs[i]}")
                 else:
                     new_seqs = self.agents[i].eval_sequences(
                         x[i],
@@ -209,6 +213,9 @@ class GAdmmCoordinator(Agent):
 
         if ADMM_DEBUG_PLOT:
             self.plot_admm_iters(u_plot_list, switch_plot_list)
+
+        # store solution for next warm start
+        for i in range(self.n): self.warm_start[i] = u[i]
 
         return cs.DM(action_list), sol_list
 
