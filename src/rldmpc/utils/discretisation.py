@@ -7,12 +7,17 @@ from math import factorial
 
 
 def forward_euler(
-    A: np.ndarray, B: np.ndarray, ts: float
+    A: np.ndarray, B: np.ndarray, ts: float, c: np.ndarray = None
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Discretise the continuous time system x_dot = Ax + Bu using forward euler method"""
+    """Discretise the continuous time system x_dot = Ax + Bu using forward euler method.
+    If c also passed uses system x_dot = Ax + Bu + c"""
     Ad = np.eye(A.shape[0]) + ts * A
     Bd = ts * B
-    return Ad, Bd
+    if c is None:
+        return Ad, Bd
+    else:
+        cd = ts * c
+        return Ad, Bd, cd
 
 
 def zero_order_hold(
