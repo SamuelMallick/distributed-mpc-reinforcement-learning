@@ -18,23 +18,44 @@ from rldmpc.core.admm import g_map
 from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
 import matplotlib.pyplot as plt
 from rldmpc.mpc.mpc_mld import MpcMld
-
+import gurobipy as gp
 from rldmpc.mpc.mpc_switching import MpcSwitching
 from rldmpc.systems.ACC import ACC
 from rldmpc.utils.pwa_models import cent_from_dist
 
+np.random.seed(0)
+
 SIM_TYPE = "mld"  # options: "mld", "g_admm", "sqp_admm"
 
-n = 1  # 1 car
+n = 2  # num cars
 acc = ACC()
 nx_l = acc.nx_l
 nu_l = acc.nu_l
-pwa_system = acc.get_pwa_system()
+system = acc.get_pwa_system()
 
-N = 10
-Q_x = np.diag([100, 1])
-Q_u = np.eye(nu_l)
-ep_len = 100  # length of episode (sim len)
+N = 5
+Q_x_l = np.diag([1, 1])
+Q_u_l = np.eye(nu_l)
+sep = np.array([[50], [0]])  # desired seperation between vehicles states
+d_safe = 0
+ep_len = 300  # length of episode (sim len)
+
+NO_OVERTAKING = False
+COMFORT = True  # regulate acell to be within bounds
+
+# construct centralised system
+systems = []  # list of systems, 1 for each agent
+for i in range(n):
+    systems.append(system.copy())
+    # no state coupling here
+    Ac_i = []
+    systems[i]["Ac"] = []
+    for j in range(
+        len(system["S"])
+    ):  # duplicate it for each PWA region, as for this PWA system the coupling matrices do not change
+        systems[i]["Ac"] = systems[i]["Ac"] + [Ac_i]
+
+cent_system = cent_from_dist(systems, np.zeros((n * nx_l, n * nx_l)))
 
 # generate trajectory of leader
 leader_state = np.zeros((2, ep_len + N + 1))
@@ -45,6 +66,7 @@ for k in range(ep_len + N):
     leader_state[:, [k + 1]] = leader_state[:, [k]] + acc.ts * np.array(
         [[leader_speed], [0]]
     )
+
 
 class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """A fleet of non-linear hybrid vehicles who track each other."""
@@ -59,16 +81,36 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
         """Resets the state of the LTI system."""
         super().reset(seed=seed, options=options)
-        self.x = np.array([[50], [5]])
+        starting_positions = [
+            400 * np.random.random() for i in range(n)
+        ]  # starting positions between 0-50 m
+        self.x = np.tile(np.array([[0], [5]]), (n, 1))
+        for i in range(n):
+            IC = max(starting_positions)  # order the agents by starting distance
+            self.x[i * nx_l, :] = IC
+            starting_positions.remove(IC)
         return self.x, {}
 
     def get_stage_cost(
         self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
     ) -> float:
         """Computes the stage cost `L(s,a)`."""
-        return (state - leader_state[:, [self.step_counter]]).T @ Q_x @ (
-            state - leader_state[:, [self.step_counter]]
-        ) + action.T @ Q_u @ action
+
+        cost = 0
+        for i in range(n):
+            local_state = state[nx_l * i : nx_l * (i + 1), :]
+            local_action = action[nu_l * i : nu_l * (i + 1), :]
+            if i == 0:
+                # first car tracks leader
+                follow_state = leader_state[:, [self.step_counter]]
+            else:
+                # other cars follow the next car
+                follow_state = state[nx_l * (i - 1) : nx_l * (i), :]
+
+            cost += (local_state - follow_state - sep).T @ Q_x_l @ (
+                local_state - follow_state - sep
+            ) + local_action.T @ Q_u_l @ local_action
+        return cost
 
     def step(
         self, action: cs.DM
@@ -77,7 +119,7 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
         action = action.full()
         r = self.get_stage_cost(self.x, action)
-        x_new = acc.step_car_dynamics(self.x, action, acc.ts)
+        x_new = acc.step_car_dynamics(self.x, action, n, acc.ts)
         self.x = x_new
 
         self.step_counter += 1
@@ -126,18 +168,89 @@ class LocalMpc(MpcSwitching):
         self.init_solver(opts, solver="ipopt")
 
 
+class MPCMldCent(MpcMld):
+    def __init__(self, system: dict, N: int) -> None:
+        super().__init__(system, N)
+
+        self.mpc_model.setObjective(0, gp.GRB.MINIMIZE)
+
+        # add extra constraints
+        if COMFORT:
+        # acceleration constraints
+            for i in range(n):
+                for k in range(N):
+                    self.mpc_model.addConstr(
+                        acc.a_dec * acc.ts
+                        <= self.x[nx_l * i + 1, [k + 1]] - self.x[nx_l * i + 1, [k]],
+                        name=f"dec_car_{i}_step{k}",
+                    )
+                    self.mpc_model.addConstr(
+                        self.x[nx_l * i + 1, [k + 1]] - self.x[nx_l * i + 1, [k]]
+                        <= acc.a_acc * acc.ts,
+                        name=f"acc_car_{i}_step{k}",
+                    )
+        if NO_OVERTAKING:
+            # safe distance behind follower vehicle
+            leader_traj = np.zeros(
+                (nx_l, N)
+            )  # fake leader_traj, will get updates each time-step
+            for i in range(n):
+                local_state = self.x[nx_l * i : nx_l * (i + 1), :]
+                if i == 0:
+                    self.first_car_safe_constrs = []
+                    # first car follows leader and therefore this constraint gets changed when the leader traj gets set
+                    follow_state = leader_traj
+                    for k in range(N):
+                        self.first_car_safe_constrs.append(
+                            self.mpc_model.addConstr(
+                                local_state[0, [k]] <= follow_state[0, [k]] - d_safe,
+                                name=f"safe_dis_car_{i}_step{k}",
+                            )
+                        )
+                else:
+                    # otherwise follow car infront (i-1)
+                    follow_state = self.x[nx_l * (i - 1) : nx_l * (i), :]
+                    for k in range(N):
+                        self.mpc_model.addConstr(
+                            local_state[0, [k]] <= follow_state[0, [k]] - d_safe,
+                            name=f"safe_dis_car_{i}_step{k}",
+                        )
+
+    def set_leader_traj(self, leader_traj):
+        obj = 0
+        for i in range(n):
+            local_state = self.x[nx_l * i : nx_l * (i + 1), :]
+            local_control = self.u[nu_l * i : nu_l * (i + 1), :]
+            if i == 0:
+                # first car follows leader
+                follow_state = leader_traj
+                if NO_OVERTAKING:
+                    for k in range(N):
+                        self.first_car_safe_constrs[k].RHS = (
+                            follow_state[0, [k]] + d_safe
+                        )
+            else:
+                # otherwise follow car infront (i-1)
+                follow_state = self.x[nx_l * (i - 1) : nx_l * (i), :]
+            for k in range(N):
+                obj += (local_state[:, k] - follow_state[:, k] - sep.T) @ Q_x_l @ (
+                    local_state[:, [k]] - follow_state[:, [k]] - sep
+                ) + local_control[:, k] @ Q_u_l @ local_control[:, [k]]
+
+        self.mpc_model.setObjective(obj, gp.GRB.MINIMIZE)
+
+
 class TrackingMldAgent(MldAgent):
     def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
         # time step starts from 1, so this will set the cost accurately for the next time-step
-        self.set_cost(Q_x, Q_u, x_goal=[leader_state[:, [k]] for k in range(timestep, timestep+N)])
-
+        self.mpc.set_leader_traj(leader_state[:, timestep : (timestep + N)])
         return super().on_timestep_end(env, episode, timestep)
 
 
 # mld mpc
-mld_mpc = MpcMld(pwa_system, N)
+mld_mpc = MPCMldCent(cent_system, N)
 # initialise the cost with the first tracking point
-mld_mpc.set_cost(Q_x, Q_u, x_goal=[leader_state[:, [k]] for k in range(N)])
+mld_mpc.set_leader_traj(leader_state[:, 0:N])
 
 # test mpc
 mpc = LocalMpc(1, 1)
@@ -165,8 +278,9 @@ else:
     R = np.squeeze(env.ep_rewards)
 
 _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
-axs[0].plot(X[:, 0])
-axs[1].plot(X[:, 1])
+for i in range(n):
+    axs[0].plot(X[:, nx_l * i])
+    axs[1].plot(X[:, nx_l * i + 1])
 axs[0].plot(leader_state[0, :], "--")
 axs[1].plot(leader_state[1, :], "--")
 _, axs = plt.subplots(1, 1, constrained_layout=True, sharex=True)

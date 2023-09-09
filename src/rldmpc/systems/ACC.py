@@ -10,7 +10,7 @@ from rldmpc.utils.discretisation import forward_euler
 class ACC:
     nx_l = 2  # dimension of local state
     nu_l = 1  # dimension of local control
-    ts = 1  # time step size for discretisation
+    ts = 0.5  # time step size for discretisation
 
     mass = 800  # mass
     c_fric = 0.5  # viscous friction coefficient
@@ -25,7 +25,7 @@ class ACC:
     x2_max = 40  # max velocity
     u_max = 1  # max throttle/brake
     a_acc = 2.5  # comfort acc
-    a_dec = 2  # comfort dec
+    a_dec = -2  # comfort dec
     d_safe = 10  # safe pos
 
     # transmission rate for each of the 6 gears
@@ -177,19 +177,29 @@ class ACC:
         }
 
     # the true non-linear dynamics of the car
-    def step_car_dynamics(self, x, u, ts):
-        """Steps the car dynamics with non-linear model by ts seconds. x is state, u is control."""
+    def step_car_dynamics(self, x, u, n, ts):
+        """Steps the car dynamics for n cars with non-linear model by ts seconds. x is state, u is control."""
         num_steps = 100
         DT = ts / num_steps
-        for i in range(num_steps):
-            f = np.array(
-                [
-                    [x[1, 0]],
-                    [-(self.c_fric * x[1, 0] ** 2) / (self.mass) - self.mu * self.grav],
-                ]
-            )
-            B = np.array([[0], [self.get_traction_force(x[1, 0]) / self.mass]])
-            x = x + DT * (f + B * u)
+        for t in range(num_steps):
+            x_temp = np.zeros(x.shape)
+            for i in range(n):
+                x_l = x[self.nx_l * i : self.nx_l * (i + 1), :]  # get local state
+                u_l = u[self.nu_l * i : self.nu_l * (i + 1), :]  # get local control
+                f = np.array(
+                    [
+                        [x_l[1, 0]],
+                        [
+                            -(self.c_fric * x_l[1, 0] ** 2) / (self.mass)
+                            - self.mu * self.grav
+                        ],
+                    ]
+                )
+                B = np.array([[0], [self.get_traction_force(x_l[1, 0]) / self.mass]])
+                x_temp[self.nx_l * i : self.nx_l * (i + 1), :] = x_l + DT * (
+                    f + B * u_l
+                )
+            x = x_temp
 
         return x
 
