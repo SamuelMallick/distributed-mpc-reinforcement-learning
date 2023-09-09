@@ -13,6 +13,7 @@ from mpcrl.wrappers.agents import Log, RecordUpdates
 import logging
 from rldmpc.agents.decent_mld_coordinator import DecentMldCoordinator
 from rldmpc.agents.mld_agent import MldAgent
+from rldmpc.agents.sequential_mld_coordinator import SequentialMldCoordinator
 from rldmpc.agents.sqp_admm_coordinator import SqpAdmmCoordinator
 from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.core.admm import g_map
@@ -26,7 +27,7 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(0)
 
-SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm", "decent_mld"
+SIM_TYPE = "seq_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
 n = 2  # num cars
 Adj = np.zeros((n, n))  # adjacency matrix
@@ -346,12 +347,27 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
                     predicted_pos[:, [k]] + acc.ts * predicted_vel[:, [k]]
                 )
                 predicted_vel[:, [k + 1]] = predicted_vel[:, [k]]
-                x_goal[k] = np.vstack([predicted_pos[:, [k]], predicted_vel[:, [k]]]) + sep
+                x_goal[k] = (
+                    np.vstack([predicted_pos[:, [k]], predicted_vel[:, [k]]]) + sep
+                )
             x_goal[N - 1] = np.vstack(
                 [predicted_pos[:, [N - 1]], predicted_vel[:, [N - 1]]]
             )
 
             self.agents[i].set_cost(Q_x_l, Q_u_l, x_goal=x_goal)
+
+
+class TrackingSequentialMldCoordinator(SequentialMldCoordinator):
+    # here we only set the leader, because the solutions are communicated down the sequence to other agents
+    def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
+        x_goal = [leader_state[:, [k]] + sep for k in range(timestep,timestep+N)]
+        self.agents[0].set_cost(Q_x_l, Q_u_l, x_goal)
+        return super().on_timestep_end(env, episode, timestep)
+
+    def on_episode_start(self, env: Env, episode: int) -> None:
+        x_goal = [leader_state[:, [k]] + sep for k in range(N)]
+        self.agents[0].set_cost(Q_x_l, Q_u_l, x_goal)
+        return super().on_episode_start(env, episode)
 
 
 # env
@@ -400,6 +416,13 @@ elif SIM_TYPE == "decent_mld":
         # passing local system
         local_mpcs.append(MpcMld(system, N))
     agent = TrackingDecentMldCoordinator(local_mpcs, nx_l, nu_l)
+elif SIM_TYPE == "seq_mld":
+    # coordinator
+    local_mpcs: list[MpcMld] = []
+    for i in range(n):
+        # passing local system
+        local_mpcs.append(MpcMld(system, N))
+    agent = TrackingSequentialMldCoordinator(local_mpcs, nx_l, nu_l, Q_x_l, Q_u_l, sep)
 
 
 agent.evaluate(env=env, episodes=1, seed=1)

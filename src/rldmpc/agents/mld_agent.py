@@ -23,6 +23,7 @@ class MldAgent(Agent):
         this agent uses an mpc that does not inheret from the MPC baseclass."""
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.mpc = mpc
+        self.x_pred = None # stores most recent predicted state after being solved
 
     def evaluate(
         self,
@@ -85,7 +86,9 @@ class MldAgent(Agent):
         return returns
 
     def get_control(self, state):
-        return self.mpc.solve_mpc(state)
+        u, x = self.mpc.solve_mpc(state)
+        self.x_pred = x
+        return u
 
     def set_cost(
         self, Q_x, Q_u, x_goal: List[np.ndarray] = None, u_goal: List[np.ndarray] = None

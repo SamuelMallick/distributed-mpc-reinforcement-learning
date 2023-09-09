@@ -26,14 +26,15 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
-class DecentMldCoordinator(MldAgent):
-    def __init__(
-        self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int
-    ) -> None:
+class SequentialMldCoordinator(MldAgent):
+    def __init__(self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int, Q_x_l, Q_u_l, sep) -> None:
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.n = len(local_mpcs)
         self.nx_l = nx_l
         self.nu_l = nu_l
+        self.Q_x_l = Q_x_l
+        self.Q_u_l = Q_u_l
+        self.sep = sep
         self.agents: list[MldAgent] = []
         for i in range(self.n):
             self.agents.append(MldAgent(local_mpcs[i]))
@@ -42,5 +43,11 @@ class DecentMldCoordinator(MldAgent):
         u = [None] * self.n
         for i in range(self.n):
             xl = state[self.nx_l * i : self.nx_l * (i + 1), :]
+            if i != 0:
+                x_pred_prev = self.agents[i - 1].x_pred
+                x_goal = [None]*x_pred_prev.shape[1]
+                for k in range(len(x_goal)):
+                    x_goal[k] = x_pred_prev[:, [k]] + self.sep
+                self.agents[i].set_cost(self.Q_x_l, self.Q_u_l, x_goal)
             u[i] = self.agents[i].get_control(xl)
         return np.vstack(u)

@@ -200,6 +200,7 @@ class MpcMld:
         self.u = u
         self.z = z
         self.delta = delta
+        self.n = n
         self.m = m
         self.N = N
 
@@ -231,10 +232,12 @@ class MpcMld:
         self.mpc_model.optimize()
         if self.mpc_model.Status == 2:  # check for successful solve
             u = self.u.X
+            x = self.x.X
         else:
             u = np.zeros((self.m, self.N))
+            x = np.zeros((self.n, self.N))
             logger.info("Infeasible")
 
         runtime = self.mpc_model.Runtime
         node_count = self.mpc_model.NodeCount
-        return u[:, [0]]
+        return u[:, [0]], x
