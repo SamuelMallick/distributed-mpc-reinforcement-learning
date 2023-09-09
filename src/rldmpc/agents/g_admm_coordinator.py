@@ -101,10 +101,13 @@ class GAdmmCoordinator(Agent):
         seeds = map(int, np.random.SeedSequence(seed).generate_state(episodes))
 
         for episode, current_seed in zip(range(episodes), seeds):
+            self.reset(current_seed)
             for agent in self.agents:
                 agent.reset(current_seed)
             state, _ = env.reset(seed=current_seed, options=env_reset_options)
             truncated, terminated, timestep = False, False, 0
+
+            self.on_episode_start(env, episode)
             for agent in self.agents:
                 agent.on_episode_start(env, episode)
 
@@ -117,17 +120,23 @@ class GAdmmCoordinator(Agent):
                         )
 
                 state, r, truncated, terminated, _ = env.step(action)
+
+                self.on_env_step(env, episode, timestep)
                 for agent in self.agents:
                     agent.on_env_step(env, episode, timestep)
 
                 returns[episode] += r
                 timestep += 1
+
+                self.on_timestep_end(env, episode, timestep)
                 for agent in self.agents:
                     agent.on_timestep_end(env, episode, timestep)
 
+            self.on_episode_end(env, episode, returns[episode])
             for agent in self.agents:
                 agent.on_episode_end(env, episode, returns[episode])
-
+        
+        self.on_validation_end(env, returns)
         for agent in self.agents:
             agent.on_validation_end(env, returns)
         return returns
