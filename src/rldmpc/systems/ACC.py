@@ -1,6 +1,8 @@
 import gurobipy as gp
 import numpy as np
 
+from rldmpc.utils.discretisation import forward_euler
+
 # adaptive cruise control system. Single agent system outlined in:
 # Adaptive Cruise Control for a SMART Car: A Comparison Benchmark for MPC-PWA Control Methods - D. Corona and B. De Schutter 2008
 
@@ -8,7 +10,7 @@ import numpy as np
 class ACC:
     nx_l = 2  # dimension of local state
     nu_l = 1  # dimension of local control
-    ts = 1  # time step size for discretisation
+    ts = 0.1  # time step size for discretisation
 
     mass = 800  # mass
     c_fric = 0.5  # viscous friction coefficient
@@ -93,13 +95,13 @@ class ACC:
         R.append(np.zeros((r, 1)))
 
     # manually append the limits
-    T.append(np.array([[v_0 + v_1 * (2)], [x2_min]]))
-    T.append(np.array([[v_0 + v_1 * (3)], [v_0 + v_1 * (2)]]))
-    T.append(np.array([[alpha], [v_0 + v_1 * (3)]]))
-    T.append(np.array([[v_0 + v_1 * (4)], [alpha]]))
-    T.append(np.array([[v_0 + v_1 * (5)], [v_0 + v_1 * (4)]]))
-    T.append(np.array([[v_0 + v_1 * (6)], [v_0 + v_1 * (5)]]))
-    T.append(np.array([[x2_max], [v_0 + v_1 * (6)]]))
+    T.append(np.array([[v_0 + v_1 * (2)], [-x2_min]]))
+    T.append(np.array([[v_0 + v_1 * (3)], [-(v_0 + v_1 * (2))]]))
+    T.append(np.array([[alpha], [-(v_0 + v_1 * (3))]]))
+    T.append(np.array([[v_0 + v_1 * (4)], [-alpha]]))
+    T.append(np.array([[v_0 + v_1 * (5)], [-(v_0 + v_1 * (4))]]))
+    T.append(np.array([[v_0 + v_1 * (6)], [-(v_0 + v_1 * (5))]]))
+    T.append(np.array([[x2_max], [-(v_0 + v_1 * (6))]]))
 
     # manually append the A matrices - first three regions have c1 and last four have c2 for friction
     A.append(np.array([[0, 1], [0, -(c1) / (mass)]]))
@@ -111,14 +113,14 @@ class ACC:
     A.append(np.array([[0, 1], [0, -(c2) / (mass)]]))
 
     # manually append B matrices
-    B.append(np.array([[0], [-(beta_0 + 1 * beta_1) / (mass)]]))
-    B.append(np.array([[0], [-(beta_0 + 2 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 1 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 2 * beta_1) / (mass)]]))
     # third and fourth share same gear as the split is over the friction coeff
-    B.append(np.array([[0], [-(beta_0 + 3 * beta_1) / (mass)]]))
-    B.append(np.array([[0], [-(beta_0 + 3 * beta_1) / (mass)]]))
-    B.append(np.array([[0], [-(beta_0 + 4 * beta_1) / (mass)]]))
-    B.append(np.array([[0], [-(beta_0 + 5 * beta_1) / (mass)]]))
-    B.append(np.array([[0], [-(beta_0 + 6 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 3 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 3 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 4 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 5 * beta_1) / (mass)]]))
+    B.append(np.array([[0], [(beta_0 + 6 * beta_1) / (mass)]]))
 
     # manually append c matrices - last four regions have offset d due to friction PWA
     c.append(np.array([[0], [-mu * grav]]))
@@ -129,10 +131,20 @@ class ACC:
     c.append(np.array([[0], [-mu * grav + d]]))
     c.append(np.array([[0], [-mu * grav + d]]))
 
+    # discretise the dynamics
+    Ad = []
+    Bd = []
+    cd = []
+    for i in range(s):
+        Ad_i, Bd_i, cd_i = forward_euler(A[i], B[i], ts, c[i])
+        Ad.append(Ad_i)
+        Bd.append(Bd_i)
+        cd.append(cd_i)
+
     D = np.array([[1, 0], [-1, 0], [0, 1], [0, -1]])
-    E = np.array([[x1_max], [x1_min], [x2_max], [x2_min]])
+    E = np.array([[x1_max], [-x1_min], [x2_max], [-x2_min]])
     F = np.array([[1], [-1]])
-    G = np.array([[u_max], [-u_max]])
+    G = np.array([[u_max], [u_max]])
 
     def get_traction_force(self, v):
         """Get the corresponding constant traction force for speed v."""
@@ -140,6 +152,12 @@ class ACC:
             j = i + 1
             if self.v_0 + j * self.v_1 <= v and v <= self.v_0 + (j + 1) * self.v_1:
                 return self.b[i]
+        
+        # if speed is outside of bounds, use the traction force for the closest region
+        if v <= self.v_0 + (2) * self.v_1:
+            return self.b[0]
+        if self.v_0 + 6 * self.v_1 <= v:
+            return self.b[-1]
         raise RuntimeError("Didn't find any traction force for the given speed!")
 
     def get_pwa_system(self):
@@ -148,9 +166,9 @@ class ACC:
             "S": self.S,
             "R": self.R,
             "T": self.T,
-            "A": self.A,
-            "B": self.B,
-            "c": self.c,
+            "A": self.Ad,
+            "B": self.Bd,
+            "c": self.cd,
             "D": self.D,
             "E": self.E,
             "F": self.F,

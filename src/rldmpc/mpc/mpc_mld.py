@@ -63,7 +63,9 @@ class MpcMld:
                 model_lin.update()
                 model_lin.optimize()
                 M_st[i][j, 0] = model_lin.ObjVal
-        logger.info("Solved linear model for PWA region bounds, M_star = " + str(M_st))
+        logger.critical(
+            "Solved linear model for PWA region bounds, M_star = " + str(M_st)
+        )
 
         # bounds for state updates
 
@@ -84,7 +86,7 @@ class MpcMld:
                 m_regions[i] = model_lin.ObjVal
             M_ub[j] = np.max(M_regions)
             m_lb[j] = np.min(m_regions)
-        logger.info(
+        logger.critical(
             "Solved linear model for PWA state update bounds, M = "
             + str(M_ub.T)
             + "', m = "
@@ -99,7 +101,7 @@ class MpcMld:
         # mpc_model.setParam("MIPStart", 1)  # using warm-starting from previous sol
 
         # Uncomment if you need to differentiate between infeasbile and unbounded
-        # mpc_model.setParam('DualReductions', 0)
+        mpc_model.setParam("DualReductions", 0)
 
         x = mpc_model.addMVar(
             (n, N + 1), lb=-float("inf"), ub=float("inf"), name="x"
@@ -200,7 +202,7 @@ class MpcMld:
         self.m = m
         self.N = N
 
-        logger.info("MLD MPC setup complete.")
+        logger.critical("MLD MPC setup complete.")
 
     def set_cost(self, Q_x, Q_u, x_goal=None, u_goal=None):
         """Set cost of the MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).

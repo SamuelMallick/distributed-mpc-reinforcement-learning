@@ -30,10 +30,10 @@ nx_l = acc.nx_l
 nu_l = acc.nu_l
 pwa_system = acc.get_pwa_system()
 
-N = 3
+N = 20
 Q_x = np.eye(nx_l)
 Q_u = np.eye(nu_l)
-goal_pos = 1000
+goal_pos = 600
 
 # the true non-linear dynamics of the car
 def step_car_dynamics(x, u, ts):
@@ -44,7 +44,7 @@ def step_car_dynamics(x, u, ts):
         f = np.array(
             [[x[1, 0]], [-(acc.c_fric * x[1, 0] ** 2) / (acc.mass) - acc.mu * acc.grav]]
         )
-        B = np.array([[0], [-acc.get_traction_force(x[1, 0]) / acc.mass]])
+        B = np.array([[0], [acc.get_traction_force(x[1, 0]) / acc.mass]])
         x = x + DT * (f + B * u)
 
     return x
@@ -135,7 +135,7 @@ mld_mpc.set_cost(Q_x, Q_u, x_goal=np.array([[goal_pos], [0]]))
 mpc = LocalMpc(1, 1)
 
 # env
-env = MonitorEpisodes(TimeLimit(CarFleet(), max_episode_steps=int(100)))
+env = MonitorEpisodes(TimeLimit(CarFleet(), max_episode_steps=int(200)))
 if SIM_TYPE == "mld":
     agent = MldAgent(mld_mpc)
 elif SIM_TYPE == "g_admm":
