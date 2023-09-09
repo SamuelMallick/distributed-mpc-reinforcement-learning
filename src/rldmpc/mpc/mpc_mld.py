@@ -1,3 +1,4 @@
+from typing import List
 import casadi as cs
 import numpy as np
 from csnlp.wrappers import Mpc
@@ -204,23 +205,25 @@ class MpcMld:
 
         logger.critical("MLD MPC setup complete.")
 
-    def set_cost(self, Q_x, Q_u, x_goal=None, u_goal=None):
+    def set_cost(
+        self, Q_x, Q_u, x_goal: List[np.ndarray] = None, u_goal: List[np.ndarray] = None
+    ):
         """Set cost of the MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
         Restricted to quadratic in the states and control.
         If x_goal or u_goal passed the cost uses (x-x_goal) and (u_goal)"""
 
         # construct zero goal points if not passed
         if x_goal is None:
-            x_goal = np.zeros(self.x[:, [0]].shape)
+            x_goal = [np.zeros(self.x[:, [0]].shape) for k in range(self.N)]
         if u_goal is None:
-            u_goal = np.zeros(self.u[:, [0]].shape)
+            u_goal = [np.zeros(self.u[:, [0]].shape) for k in range(self.N)]
 
         obj = 0
         for k in range(self.N):
-            obj += (self.x[:, k] - x_goal.T) @ Q_x @ (self.x[:, [k]] - x_goal) + (
-                self.u[:, k] - u_goal.T
-            ) @ Q_u @ (self.u[:, [k]] - u_goal)
-        obj += (self.x[:, k] - x_goal.T) @ Q_x @ (self.x[:, [k]] - x_goal)
+            obj += (self.x[:, k] - x_goal[k].T) @ Q_x @ (self.x[:, [k]] - x_goal[k]) + (
+                self.u[:, k] - u_goal[k].T
+            ) @ Q_u @ (self.u[:, [k]] - u_goal[k])
+        obj += (self.x[:, k] - x_goal[k].T) @ Q_x @ (self.x[:, [k]] - x_goal[k])
         self.mpc_model.setObjective(obj, gp.GRB.MINIMIZE)
 
     def solve_mpc(self, state):
@@ -231,6 +234,7 @@ class MpcMld:
         else:
             u = np.zeros((self.m, self.N))
             logger.info("Infeasible")
+
         runtime = self.mpc_model.Runtime
         node_count = self.mpc_model.NodeCount
         return u[:, [0]]

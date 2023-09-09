@@ -1,4 +1,4 @@
-from typing import Any, Collection, Iterable, Literal, Optional, Sequence, Union
+from typing import Any, Collection, Iterable, List, Literal, Optional, Sequence, Union
 import casadi as cs
 from csnlp import Solution
 from csnlp.wrappers import Mpc
@@ -84,7 +84,9 @@ class MldAgent(Agent):
         self.on_validation_end(env, returns)
         return returns
 
-    def set_cost(self, Q_x, Q_u, x_goal=None, u_goal=None):
+    def set_cost(
+        self, Q_x, Q_u, x_goal: List[np.ndarray] = None, u_goal: List[np.ndarray] = None
+    ):
         """Set cost of the agents mpc-MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
         Restricted to quadratic in the states and control.
         If x_goal or u_goal passed the cost uses (x-x_goal) and (u_goal)"""

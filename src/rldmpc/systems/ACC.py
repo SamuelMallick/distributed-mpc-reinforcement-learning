@@ -1,6 +1,6 @@
 import gurobipy as gp
 import numpy as np
-
+import matplotlib.pyplot as plt
 from rldmpc.utils.discretisation import forward_euler
 
 # adaptive cruise control system. Single agent system outlined in:
@@ -10,7 +10,7 @@ from rldmpc.utils.discretisation import forward_euler
 class ACC:
     nx_l = 2  # dimension of local state
     nu_l = 1  # dimension of local control
-    ts = 0.1  # time step size for discretisation
+    ts = 1  # time step size for discretisation
 
     mass = 800  # mass
     c_fric = 0.5  # viscous friction coefficient
@@ -41,6 +41,7 @@ class ACC:
     c1 = beta / alpha
     c2 = (c_fric * x2_max**2 - beta) / (x2_max - alpha)
     d = beta - alpha * ((c_fric * x2_max**2 - beta) / (x2_max - alpha))
+    # d = 0.230769
 
     # PWA approximation of gear function b(j, x2)
     # first step - consider only regions constant with velocity, therefore we use values in list b
@@ -126,10 +127,10 @@ class ACC:
     c.append(np.array([[0], [-mu * grav]]))
     c.append(np.array([[0], [-mu * grav]]))
     c.append(np.array([[0], [-mu * grav]]))
-    c.append(np.array([[0], [-mu * grav + d]]))
-    c.append(np.array([[0], [-mu * grav + d]]))
-    c.append(np.array([[0], [-mu * grav + d]]))
-    c.append(np.array([[0], [-mu * grav + d]]))
+    c.append(np.array([[0], [-mu * grav - d / mass]]))
+    c.append(np.array([[0], [-mu * grav - d / mass]]))
+    c.append(np.array([[0], [-mu * grav - d / mass]]))
+    c.append(np.array([[0], [-mu * grav - d / mass]]))
 
     # discretise the dynamics
     Ad = []
@@ -152,7 +153,7 @@ class ACC:
             j = i + 1
             if self.v_0 + j * self.v_1 <= v and v <= self.v_0 + (j + 1) * self.v_1:
                 return self.b[i]
-        
+
         # if speed is outside of bounds, use the traction force for the closest region
         if v <= self.v_0 + (2) * self.v_1:
             return self.b[0]
@@ -174,3 +175,66 @@ class ACC:
             "F": self.F,
             "G": self.G,
         }
+
+    # the true non-linear dynamics of the car
+    def step_car_dynamics(self, x, u, ts):
+        """Steps the car dynamics with non-linear model by ts seconds. x is state, u is control."""
+        num_steps = 100
+        DT = ts / num_steps
+        for i in range(num_steps):
+            f = np.array(
+                [
+                    [x[1, 0]],
+                    [-(self.c_fric * x[1, 0] ** 2) / (self.mass) - self.mu * self.grav],
+                ]
+            )
+            B = np.array([[0], [self.get_traction_force(x[1, 0]) / self.mass]])
+            x = x + DT * (f + B * u)
+
+        return x
+
+
+if __name__ == "__main__":
+    # check validity of PWA approximation
+
+    acc = ACC()
+    pwa_sys = acc.get_pwa_system()
+
+    test_len = 100
+    np.random.seed(0)
+    x0 = np.array([[10], [5]])
+    u = np.random.random((1, test_len))  # random control samples between 0 and 1
+    x_nl = np.zeros((2, test_len))  # non-linear traj
+    x_pwa = np.zeros((2, test_len))  # pwa traj
+
+    # set IC
+    x_nl[:, [0]] = x0
+    x_pwa[:, [0]] = x0
+    for t in range(test_len - 1):
+        # step non linear
+        x_nl[:, [t + 1]] = acc.step_car_dynamics(x_nl[:, [t]], u[:, [t]], acc.ts)
+
+        # step pwa
+        region_found = False
+        for i in range(len(pwa_sys["S"])):
+            if all(
+                pwa_sys["S"][i] @ x_pwa[:, [t]] + pwa_sys["R"][i] @ u[:, [t]]
+                <= pwa_sys["T"][i]
+            ):
+                x_pwa[:, [t + 1]] = (
+                    pwa_sys["A"][i] @ x_pwa[:, [t]]
+                    + pwa_sys["B"][i] @ u[:, [t]]
+                    + pwa_sys["c"][i]
+                )
+                region_found = True
+                break
+        if region_found is False:
+            break
+            # raise RuntimeError("Didn't find region.")
+
+    _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
+    axs[0].plot(x_nl[0, :], "r")
+    axs[0].plot(x_pwa[0, :], "b")
+    axs[1].plot(x_nl[1, :], "r")
+    axs[1].plot(x_pwa[1, :], "b")
+    plt.show()
