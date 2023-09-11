@@ -26,7 +26,7 @@ logger.addHandler(console_handler)
 class GAdmmCoordinator(Agent):
     """Coordinates the greedy ADMM algorithm for PWA agents"""
 
-    admm_iters = 50
+    admm_iters = 100
 
     def __init__(
         self,
@@ -155,7 +155,7 @@ class GAdmmCoordinator(Agent):
 
         # TODO initial feasible control guess
         # u = self.warm_start
-        u = [np.ones((self.nu_l, self.N)) for i in range(self.n)]
+        u = [np.zeros((self.nu_l, self.N)) for i in range(self.n)]
 
         # generate initial feasible coupling via dynamics rollout
         x_rout = self.dynamics_rollout(x, u)

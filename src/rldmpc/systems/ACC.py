@@ -13,8 +13,8 @@ class ACC:
     ts = 1  # time step size for discretisation
 
     # local costs
-    Q_x_l = np.diag([1, 1])
-    Q_u_l = np.eye(nu_l)
+    Q_x_l = np.diag([1, 0.1])
+    Q_u_l = 0.1 * np.eye(nu_l)
 
     sep = np.array([[-50], [0]])  # desired seperation between vehicles states
     d_safe = 0  # safe distance between cars
@@ -33,7 +33,7 @@ class ACC:
     u_max = 1  # max throttle/brake
     a_acc = 2.5  # comfort acc
     a_dec = -2  # comfort dec
-    d_safe = 10  # safe pos
+    d_safe = 15  # safe pos
 
     # transmission rate for each of the 6 gears
     p = [14.203, 10.310, 7.407, 5.625, 4.083, 2.933]
@@ -154,6 +154,19 @@ class ACC:
     F = np.array([[1], [-1]])
     G = np.array([[u_max], [u_max]])
 
+    pwa_system = {
+        "S": S,
+        "R": R,
+        "T": T,
+        "A": Ad,
+        "B": Bd,
+        "c": cd,
+        "D": D,
+        "E": E,
+        "F": F,
+        "G": G,
+    }
+
     def __init__(self, ep_len, N):
         # generate trajectory of leader
         leader_state = np.zeros((2, ep_len + N + 1))
@@ -182,23 +195,12 @@ class ACC:
 
     def get_pwa_system(self):
         """Get to system dictionary."""
-        return {
-            "S": self.S,
-            "R": self.R,
-            "T": self.T,
-            "A": self.Ad,
-            "B": self.Bd,
-            "c": self.cd,
-            "D": self.D,
-            "E": self.E,
-            "F": self.F,
-            "G": self.G,
-        }
+        return self.pwa_system
 
     # the true non-linear dynamics of the car
-    def step_car_dynamics(self, x, u, n, ts):
+    def step_car_dynamics_nl(self, x, u, n, ts):
         """Steps the car dynamics for n cars with non-linear model by ts seconds. x is state, u is control."""
-        num_steps = 100
+        num_steps = 10
         DT = ts / num_steps
         for t in range(num_steps):
             x_temp = np.zeros(x.shape)
@@ -222,6 +224,28 @@ class ACC:
 
         return x
 
+    def step_car_dynamics_pwa(self, x, u, n, ts):
+        """Steps the car dynamics for n cars with pwa model by ts seconds. x is state, u is control."""
+        x_temp = np.zeros(x.shape)
+        for i in range(n):
+            x_l = x[self.nx_l * i : self.nx_l * (i + 1), :]  # get local state
+            u_l = u[self.nu_l * i : self.nu_l * (i + 1), :]  # get local control
+            for j in range(len(self.pwa_system["S"])):
+                if all(
+                    self.pwa_system["S"][j] @ x_l
+                    + self.pwa_system["R"][j] @ u_l
+                    <= self.pwa_system["T"][j] + np.array([[0], [1e-4]])    # buffer is to have one of the as a strict inequality
+                ):
+                    x_pwa = (
+                        self.pwa_system["A"][j] @ x_l
+                        + self.pwa_system["B"][j] @ u_l
+                        + self.pwa_system["c"][j]
+                    )
+                    break
+            x_temp[self.nx_l * i : self.nx_l * (i + 1), :] = x_pwa
+
+        return x_temp
+
     def get_leader_state(self):
         return self.leader_state
 
@@ -229,40 +253,23 @@ class ACC:
 if __name__ == "__main__":
     # check validity of PWA approximation
 
-    acc = ACC()
+    acc = ACC(0, 0)
     pwa_sys = acc.get_pwa_system()
 
     test_len = 100
     np.random.seed(0)
-    x0 = np.array([[10], [5]])
-    u = np.random.random((1, test_len))  # random control samples between 0 and 1
-    x_nl = np.zeros((2, test_len))  # non-linear traj
-    x_pwa = np.zeros((2, test_len))  # pwa traj
+    x0 = np.array([[10], [5], [20], [6]])
+    u = np.random.random((2, test_len))  # random control samples between 0 and 1
+    x_nl = np.zeros((4, test_len))  # non-linear traj
+    x_pwa = np.zeros((4, test_len))  # pwa traj
 
     # set IC
     x_nl[:, [0]] = x0
     x_pwa[:, [0]] = x0
     for t in range(test_len - 1):
         # step non linear
-        x_nl[:, [t + 1]] = acc.step_car_dynamics(x_nl[:, [t]], u[:, [t]], acc.ts)
-
-        # step pwa
-        region_found = False
-        for i in range(len(pwa_sys["S"])):
-            if all(
-                pwa_sys["S"][i] @ x_pwa[:, [t]] + pwa_sys["R"][i] @ u[:, [t]]
-                <= pwa_sys["T"][i]
-            ):
-                x_pwa[:, [t + 1]] = (
-                    pwa_sys["A"][i] @ x_pwa[:, [t]]
-                    + pwa_sys["B"][i] @ u[:, [t]]
-                    + pwa_sys["c"][i]
-                )
-                region_found = True
-                break
-        if region_found is False:
-            break
-            # raise RuntimeError("Didn't find region.")
+        x_nl[:, [t + 1]] = acc.step_car_dynamics_nl(x_nl[:, [t]], u[:, [t]], 2, acc.ts)
+        x_pwa[:, [t + 1]] = acc.step_car_dynamics_pwa(x_nl[:, [t]], u[:, [t]], 2, acc.ts)
 
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
     axs[0].plot(x_nl[0, :], "r")

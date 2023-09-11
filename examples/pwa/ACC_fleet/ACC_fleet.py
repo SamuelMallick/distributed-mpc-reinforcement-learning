@@ -24,11 +24,11 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(0)
 
-SIM_TYPE = "seq_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
+SIM_TYPE = "decent_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
-n = 2  # num cars
+n = 4  # num cars
 N = 10  # controller horizon
-ep_len = 50  # length of episode (sim len)
+ep_len = 100  # length of episode (sim len)
 Adj = np.zeros((n, n))  # adjacency matrix
 for i in range(n):  # make it chain coupling
     if i == 0:
@@ -52,7 +52,6 @@ leader_state = acc.get_leader_state()
 
 
 NO_OVERTAKING = False
-COMFORT = False  # regulate acell to be within bounds
 
 # construct centralised system
 # no state coupling here so all zeros
@@ -108,6 +107,13 @@ class LocalMpc(MpcSwitching):
         for k in range(N):
             self.constraint(f"state_{k}", system["D"] @ x[:, [k]], "<=", system["E"])
             self.constraint(f"control_{k}", system["F"] @ u[:, [k]], "<=", system["G"])
+
+            # acceleration limits
+
+            self.constraint(f"acc_{k}", x[1, [k+1]] - x[1, [k]] , "<=", acc.a_acc* acc.ts)
+            self.constraint(f"de_acc_{k}", x[1, [k+1]] - x[1, [k]] , ">=", acc.a_dec* acc.ts)
+
+
 
         # objective
         if leader:
@@ -177,20 +183,19 @@ class MPCMldCent(MpcMld):
         self.mpc_model.setObjective(0, gp.GRB.MINIMIZE)
 
         # add extra constraints
-        if COMFORT:
-            # acceleration constraints
-            for i in range(n):
-                for k in range(N):
-                    self.mpc_model.addConstr(
-                        acc.a_dec * acc.ts
-                        <= self.x[nx_l * i + 1, [k + 1]] - self.x[nx_l * i + 1, [k]],
-                        name=f"dec_car_{i}_step{k}",
-                    )
-                    self.mpc_model.addConstr(
-                        self.x[nx_l * i + 1, [k + 1]] - self.x[nx_l * i + 1, [k]]
-                        <= acc.a_acc * acc.ts,
-                        name=f"acc_car_{i}_step{k}",
-                    )
+        # acceleration constraints
+        for i in range(n):
+            for k in range(N):
+                self.mpc_model.addConstr(
+                    acc.a_dec * acc.ts
+                    <= self.x[nx_l * i + 1, [k + 1]] - self.x[nx_l * i + 1, [k]],
+                    name=f"dec_car_{i}_step{k}",
+                )
+                self.mpc_model.addConstr(
+                    self.x[nx_l * i + 1, [k + 1]] - self.x[nx_l * i + 1, [k]]
+                    <= acc.a_acc * acc.ts,
+                    name=f"acc_car_{i}_step{k}",
+                )
         if NO_OVERTAKING:
             # safe distance behind follower vehicle
             leader_traj = np.zeros(
@@ -229,7 +234,7 @@ class MPCMldCent(MpcMld):
                 if NO_OVERTAKING:
                     for k in range(N):
                         self.first_car_safe_constrs[k].RHS = (
-                            follow_state[0, [k]] + d_safe
+                            follow_state[0, [k]] - d_safe
                         )
             else:
                 # otherwise follow car infront (i-1)
@@ -247,7 +252,20 @@ class TrackingMldAgent(MldAgent):
         # time step starts from 1, so this will set the cost accurately for the next time-step
         self.mpc.set_leader_traj(leader_state[:, timestep : (timestep + N)])
         return super().on_timestep_end(env, episode, timestep)
+    
+    def on_episode_start(self, env: Env, episode: int) -> None:
+        self.mpc.set_leader_traj(leader_state[:, 0:N])
+        return super().on_episode_start(env, episode)
+    
+class LocalMpcMld(MpcMld):
 
+    def __init__(self, system: dict, N: int) -> None:
+        super().__init__(system, N)
+
+        # add accel cnstrs
+        for k in range(N):
+            self.mpc_model.addConstr(self.x[1, [k+1]] - self.x[1, [k]] <= acc.a_acc*acc.ts, name = f"acc_{k}")
+            self.mpc_model.addConstr(self.x[1, [k+1]] - self.x[1, [k]] >= acc.a_dec*acc.ts, name = f"dec_{k}")
 
 class TrackingDecentMldCoordinator(DecentMldCoordinator):
     # current state of car to be tracked is observed and propogated forward
@@ -338,14 +356,14 @@ elif SIM_TYPE == "decent_mld":
     local_mpcs: list[MpcMld] = []
     for i in range(n):
         # passing local system
-        local_mpcs.append(MpcMld(system, N))
+        local_mpcs.append(LocalMpcMld(system, N))
     agent = TrackingDecentMldCoordinator(local_mpcs, nx_l, nu_l)
 elif SIM_TYPE == "seq_mld":
     # coordinator
     local_mpcs: list[MpcMld] = []
     for i in range(n):
         # passing local system
-        local_mpcs.append(MpcMld(system, N))
+        local_mpcs.append(LocalMpcMld(system, N))
     agent = TrackingSequentialMldCoordinator(local_mpcs, nx_l, nu_l, Q_x_l, Q_u_l, sep)
 
 

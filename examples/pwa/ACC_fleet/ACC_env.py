@@ -35,7 +35,7 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         starting_positions = [
             400 * np.random.random() for i in range(self.n)
         ]  # starting positions between 0-50 m
-        self.x = np.tile(np.array([[0], [25]]), (self.n, 1))
+        self.x = np.tile(np.array([[0], [5]]), (self.n, 1))
         for i in range(self.n):
             IC = max(starting_positions)  # order the agents by starting distance
             self.x[i * self.nx_l, :] = IC
@@ -70,7 +70,7 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
         action = action.full()
         r = self.get_stage_cost(self.x, action)
-        x_new = self.acc.step_car_dynamics(self.x, action, self.n, self.acc.ts)
+        x_new = self.acc.step_car_dynamics_pwa(self.x, action, self.n, self.acc.ts)
         self.x = x_new
 
         self.step_counter += 1
