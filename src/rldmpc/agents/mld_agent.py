@@ -91,7 +91,7 @@ class MldAgent(Agent):
         return u
 
     def set_cost(
-        self, Q_x, Q_u, x_goal: List[np.ndarray] = None, u_goal: List[np.ndarray] = None
+        self, Q_x, Q_u, x_goal: np.ndarray = None, u_goal: np.ndarray = None
     ):
         """Set cost of the agents mpc-MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
         Restricted to quadratic in the states and control.

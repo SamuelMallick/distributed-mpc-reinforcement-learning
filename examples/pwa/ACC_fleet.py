@@ -27,7 +27,7 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(0)
 
-SIM_TYPE = "seq_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
+SIM_TYPE = "mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
 n = 2  # num cars
 Adj = np.zeros((n, n))  # adjacency matrix
@@ -47,10 +47,10 @@ nx_l = acc.nx_l
 nu_l = acc.nu_l
 system = acc.get_pwa_system()
 
-N = 5
+N = 10
 Q_x_l = np.diag([1, 1])
 Q_u_l = np.eye(nu_l)
-sep = np.array([[50], [0]])  # desired seperation between vehicles states
+sep = np.array([[-50], [0]])  # desired seperation between vehicles states
 d_safe = 0
 ep_len = 50  # length of episode (sim len)
 
@@ -333,7 +333,6 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
 
     def observe_states(self, timestep):
         for i in range(n):
-            x_goal = [None] * N
             predicted_pos = np.zeros((1, N))
             predicted_vel = np.zeros((1, N))
             if i == 0:  # lead car
@@ -347,12 +346,8 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
                     predicted_pos[:, [k]] + acc.ts * predicted_vel[:, [k]]
                 )
                 predicted_vel[:, [k + 1]] = predicted_vel[:, [k]]
-                x_goal[k] = (
-                    np.vstack([predicted_pos[:, [k]], predicted_vel[:, [k]]]) + sep
-                )
-            x_goal[N - 1] = np.vstack(
-                [predicted_pos[:, [N - 1]], predicted_vel[:, [N - 1]]]
-            )
+
+            x_goal = np.vstack([predicted_pos, predicted_vel]) + np.tile(sep, N) 
 
             self.agents[i].set_cost(Q_x_l, Q_u_l, x_goal=x_goal)
 
@@ -360,12 +355,12 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
 class TrackingSequentialMldCoordinator(SequentialMldCoordinator):
     # here we only set the leader, because the solutions are communicated down the sequence to other agents
     def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
-        x_goal = [leader_state[:, [k]] + sep for k in range(timestep,timestep+N)]
+        x_goal = leader_state[:, timestep:timestep+N] + np.tile(sep, N) 
         self.agents[0].set_cost(Q_x_l, Q_u_l, x_goal)
         return super().on_timestep_end(env, episode, timestep)
 
     def on_episode_start(self, env: Env, episode: int) -> None:
-        x_goal = [leader_state[:, [k]] + sep for k in range(N)]
+        x_goal = leader_state[:, 0:N] + np.tile(sep, N) 
         self.agents[0].set_cost(Q_x_l, Q_u_l, x_goal)
         return super().on_episode_start(env, episode)
 

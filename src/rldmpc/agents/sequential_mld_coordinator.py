@@ -15,8 +15,6 @@ import matplotlib.pyplot as plt
 from mpcrl.core.exploration import ExplorationStrategy, NoExploration
 from rldmpc.mpc.mpc_mld import MpcMld
 
-ADMM_DEBUG_PLOT = False
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 console_handler = logging.StreamHandler()
@@ -27,7 +25,25 @@ logger.addHandler(console_handler)
 
 
 class SequentialMldCoordinator(MldAgent):
-    def __init__(self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int, Q_x_l, Q_u_l, sep) -> None:
+    """A coordinatoof MLD agents that solve their local problems in a sequence, communicating the soltuions to the next agent in sequence."""
+    def __init__(self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int, Q_x_l: np.ndarray, Q_u_l: np.ndarray, sep: np.ndarray) -> None:
+        """Initialise the coordinator.
+        
+        Parameters
+        ----------
+        local_mpcs: List[MpcMld]
+            List of local MLD based MPCs - one for each agent.
+        nx_l: int
+            Dimension of local state.
+        nu_l: int
+            Dimension of local control.
+        Q_x_l: np.ndarray
+            Quadratic penalty matrix for state tracking.
+        Q_u_l: np.ndarray
+            Quadratic penalty matrix for control effort.
+        sep: np.ndarray
+            Desired state seperation between tracked vehicles.
+        """
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.n = len(local_mpcs)
         self.nx_l = nx_l
@@ -45,9 +61,7 @@ class SequentialMldCoordinator(MldAgent):
             xl = state[self.nx_l * i : self.nx_l * (i + 1), :]
             if i != 0:
                 x_pred_prev = self.agents[i - 1].x_pred
-                x_goal = [None]*x_pred_prev.shape[1]
-                for k in range(len(x_goal)):
-                    x_goal[k] = x_pred_prev[:, [k]] + self.sep
+                x_goal = x_pred_prev + np.tile(self.sep, x_pred_prev.shape[1])
                 self.agents[i].set_cost(self.Q_x_l, self.Q_u_l, x_goal)
             u[i] = self.agents[i].get_control(xl)
         return np.vstack(u)
