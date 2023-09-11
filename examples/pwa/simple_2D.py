@@ -1,5 +1,6 @@
 # Modifying the simple 2D system from David Mayne's
-# 2003 paper on PWa systems, adapted to by a network
+# 2003 paper on PWA systems, adapted to be a network
+
 from csnlp import Nlp
 import gymnasium as gym
 import numpy as np
@@ -22,7 +23,7 @@ from rldmpc.mpc.mpc_mld import MpcMld
 from rldmpc.mpc.mpc_switching import MpcSwitching
 from rldmpc.utils.pwa_models import cent_from_dist
 
-SIM_TYPE = "sqp_admm"  # options: "mld", "g_admm", "sqp_admm"
+SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm"
 
 # create system
 

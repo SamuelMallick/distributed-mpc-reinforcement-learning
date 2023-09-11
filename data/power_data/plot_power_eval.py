@@ -8,7 +8,7 @@ num_eps = 100
 ep_len = 100
 
 with open(
-    "data/power_data/line_40/dist_eval.pkl",
+    "data/power_data/line_40/distributed_con_eval.pkl",
     "rb",
 ) as file:
     X_l = pickle.load(file)

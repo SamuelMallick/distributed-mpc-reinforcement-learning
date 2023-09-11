@@ -32,7 +32,7 @@ class ACC:
     u_max = 1  # max throttle/brake
     a_acc = 2.5  # comfort acc
     a_dec = -2  # comfort dec
-    d_safe = 100  # safe pos
+    d_safe = 25  # safe pos
 
     # transmission rate for each of the 6 gears
     p = [14.203, 10.310, 7.407, 5.625, 4.083, 2.933]

@@ -24,11 +24,11 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(1)
 
-SIM_TYPE = "mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
+SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
 n = 2  # num cars
 N = 10  # controller horizon
-ep_len = 100  # length of episode (sim len)
+ep_len = 50  # length of episode (sim len)
 Adj = np.zeros((n, n))  # adjacency matrix
 for i in range(n):  # make it chain coupling
     if i == 0:
@@ -124,7 +124,8 @@ class LocalMpc(MpcSwitching):
         if leader:
             self.leader_traj = []
             for k in range(N):
-                temp = self.leader_traj.append(self.parameter(f"x_ref_{k}", (nx_l, 1)))
+                temp = self.parameter(f"x_ref_{k}", (nx_l, 1))
+                self.leader_traj.append(temp)
                 self.fixed_pars_init[f"x_ref_{k}"] = np.zeros((nx_l, 1))
                 self.constraint(
                     f"safety_{k}", x[0, [k]], "<=", temp[0] - d_safe
