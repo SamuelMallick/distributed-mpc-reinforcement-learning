@@ -27,9 +27,7 @@ logger.addHandler(console_handler)
 
 
 class DecentMldCoordinator(MldAgent):
-    def __init__(
-        self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int
-    ) -> None:
+    def __init__(self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int) -> None:
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.n = len(local_mpcs)
         self.nx_l = nx_l

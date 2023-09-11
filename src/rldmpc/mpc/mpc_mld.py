@@ -206,9 +206,7 @@ class MpcMld:
 
         logger.critical("MLD MPC setup complete.")
 
-    def set_cost(
-        self, Q_x, Q_u, x_goal: np.ndarray = None, u_goal: np.ndarray = None
-    ):
+    def set_cost(self, Q_x, Q_u, x_goal: np.ndarray = None, u_goal: np.ndarray = None):
         """Set cost of the MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
         Restricted to quadratic in the states and control.
         If x_goal or u_goal passed the cost uses (x-x_goal) and (u_goal)"""
@@ -221,9 +219,11 @@ class MpcMld:
 
         obj = 0
         for k in range(self.N):
-            obj += (self.x[:, k] - x_goal[:, k].T) @ Q_x @ (self.x[:, [k]] - x_goal[:, [k]]) + (
-                self.u[:, k] - u_goal[:, k].T
-            ) @ Q_u @ (self.u[:, [k]] - u_goal[:, [k]])
+            obj += (self.x[:, k] - x_goal[:, k].T) @ Q_x @ (
+                self.x[:, [k]] - x_goal[:, [k]]
+            ) + (self.u[:, k] - u_goal[:, k].T) @ Q_u @ (
+                self.u[:, [k]] - u_goal[:, [k]]
+            )
         self.mpc_model.setObjective(obj, gp.GRB.MINIMIZE)
 
     def solve_mpc(self, state):

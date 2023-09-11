@@ -12,6 +12,13 @@ class ACC:
     nu_l = 1  # dimension of local control
     ts = 1  # time step size for discretisation
 
+    # local costs
+    Q_x_l = np.diag([1, 1])
+    Q_u_l = np.eye(nu_l)
+
+    sep = np.array([[-50], [0]])  # desired seperation between vehicles states
+    d_safe = 0  # safe distance between cars
+
     mass = 800  # mass
     c_fric = 0.5  # viscous friction coefficient
     mu = 0.01  # coulomb friction coefficient
@@ -147,6 +154,18 @@ class ACC:
     F = np.array([[1], [-1]])
     G = np.array([[u_max], [u_max]])
 
+    def __init__(self, ep_len, N):
+        # generate trajectory of leader
+        leader_state = np.zeros((2, ep_len + N + 1))
+        leader_speed = 15
+        leader_initial_pos = 500
+        leader_state[:, [0]] = np.array([[leader_initial_pos], [leader_speed]])
+        for k in range(ep_len + N):
+            leader_state[:, [k + 1]] = leader_state[:, [k]] + self.ts * np.array(
+                [[leader_speed], [0]]
+            )
+        self.leader_state = leader_state
+
     def get_traction_force(self, v):
         """Get the corresponding constant traction force for speed v."""
         for i in range(len(self.b)):
@@ -202,6 +221,9 @@ class ACC:
             x = x_temp
 
         return x
+
+    def get_leader_state(self):
+        return self.leader_state
 
 
 if __name__ == "__main__":

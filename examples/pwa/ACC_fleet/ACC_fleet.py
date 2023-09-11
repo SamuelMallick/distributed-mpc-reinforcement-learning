@@ -1,21 +1,18 @@
 from csnlp import Nlp
-import gymnasium as gym
+
 from gymnasium import Env
-from mpcrl import Agent
 import numpy as np
 import casadi as cs
 import numpy.typing as npt
-from typing import Any, Dict, List, Optional, Tuple, Union
 from scipy.linalg import block_diag
 from mpcrl.wrappers.envs import MonitorEpisodes
 from gymnasium.wrappers import TimeLimit
-from mpcrl.wrappers.agents import Log, RecordUpdates
+from mpcrl.wrappers.agents import Log
 import logging
+from ACC_env import CarFleet
 from rldmpc.agents.decent_mld_coordinator import DecentMldCoordinator
 from rldmpc.agents.mld_agent import MldAgent
 from rldmpc.agents.sequential_mld_coordinator import SequentialMldCoordinator
-from rldmpc.agents.sqp_admm_coordinator import SqpAdmmCoordinator
-from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.core.admm import g_map
 from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
 import matplotlib.pyplot as plt
@@ -27,9 +24,11 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(0)
 
-SIM_TYPE = "mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
+SIM_TYPE = "seq_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
 n = 2  # num cars
+N = 10  # controller horizon
+ep_len = 50  # length of episode (sim len)
 Adj = np.zeros((n, n))  # adjacency matrix
 for i in range(n):  # make it chain coupling
     if i == 0:
@@ -39,20 +38,18 @@ for i in range(n):  # make it chain coupling
     else:
         Adj[i, i + 1] = 1
         Adj[i, i - 1] = 1
-
 G_map = g_map(Adj)
 
-acc = ACC()
+acc = ACC(ep_len, N)
 nx_l = acc.nx_l
 nu_l = acc.nu_l
 system = acc.get_pwa_system()
+Q_x_l = acc.Q_x_l
+Q_u_l = acc.Q_u_l
+sep = acc.sep
+d_safe = acc.d_safe
+leader_state = acc.get_leader_state()
 
-N = 10
-Q_x_l = np.diag([1, 1])
-Q_u_l = np.eye(nu_l)
-sep = np.array([[-50], [0]])  # desired seperation between vehicles states
-d_safe = 0
-ep_len = 50  # length of episode (sim len)
 
 NO_OVERTAKING = False
 COMFORT = False  # regulate acell to be within bounds
@@ -75,74 +72,6 @@ for i in range(n):
         systems[i]["Ac"] = systems[i]["Ac"] + [Ac_i]
 
 cent_system = cent_from_dist(systems, Adj)
-
-# generate trajectory of leader
-leader_state = np.zeros((2, ep_len + N + 1))
-leader_speed = 15
-leader_initial_pos = 500
-leader_state[:, [0]] = np.array([[leader_initial_pos], [leader_speed]])
-for k in range(ep_len + N):
-    leader_state[:, [k + 1]] = leader_state[:, [k]] + acc.ts * np.array(
-        [[leader_speed], [0]]
-    )
-
-
-class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
-    """A fleet of non-linear hybrid vehicles who track each other."""
-
-    step_counter = 0
-
-    def reset(
-        self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[npt.NDArray[np.floating], Dict[str, Any]]:
-        """Resets the state of the LTI system."""
-        super().reset(seed=seed, options=options)
-        starting_positions = [
-            400 * np.random.random() for i in range(n)
-        ]  # starting positions between 0-50 m
-        self.x = np.tile(np.array([[0], [25]]), (n, 1))
-        for i in range(n):
-            IC = max(starting_positions)  # order the agents by starting distance
-            self.x[i * nx_l, :] = IC
-            starting_positions.remove(IC)
-        return self.x, {}
-
-    def get_stage_cost(
-        self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
-    ) -> float:
-        """Computes the stage cost `L(s,a)`."""
-
-        cost = 0
-        for i in range(n):
-            local_state = state[nx_l * i : nx_l * (i + 1), :]
-            local_action = action[nu_l * i : nu_l * (i + 1), :]
-            if i == 0:
-                # first car tracks leader
-                follow_state = leader_state[:, [self.step_counter]]
-            else:
-                # other cars follow the next car
-                follow_state = state[nx_l * (i - 1) : nx_l * (i), :]
-
-            cost += (local_state - follow_state - sep).T @ Q_x_l @ (
-                local_state - follow_state - sep
-            ) + local_action.T @ Q_u_l @ local_action
-        return cost
-
-    def step(
-        self, action: cs.DM
-    ) -> Tuple[npt.NDArray[np.floating], float, bool, bool, Dict[str, Any]]:
-        """Steps the LTI system."""
-
-        action = action.full()
-        r = self.get_stage_cost(self.x, action)
-        x_new = acc.step_car_dynamics(self.x, action, n, acc.ts)
-        self.x = x_new
-
-        self.step_counter += 1
-        return x_new, r, False, False, {}
 
 
 class LocalMpc(MpcSwitching):
@@ -347,7 +276,7 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
                 )
                 predicted_vel[:, [k + 1]] = predicted_vel[:, [k]]
 
-            x_goal = np.vstack([predicted_pos, predicted_vel]) + np.tile(sep, N) 
+            x_goal = np.vstack([predicted_pos, predicted_vel]) + np.tile(sep, N)
 
             self.agents[i].set_cost(Q_x_l, Q_u_l, x_goal=x_goal)
 
@@ -355,18 +284,18 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
 class TrackingSequentialMldCoordinator(SequentialMldCoordinator):
     # here we only set the leader, because the solutions are communicated down the sequence to other agents
     def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
-        x_goal = leader_state[:, timestep:timestep+N] + np.tile(sep, N) 
+        x_goal = leader_state[:, timestep : timestep + N] + np.tile(sep, N)
         self.agents[0].set_cost(Q_x_l, Q_u_l, x_goal)
         return super().on_timestep_end(env, episode, timestep)
 
     def on_episode_start(self, env: Env, episode: int) -> None:
-        x_goal = leader_state[:, 0:N] + np.tile(sep, N) 
+        x_goal = leader_state[:, 0:N] + np.tile(sep, N)
         self.agents[0].set_cost(Q_x_l, Q_u_l, x_goal)
         return super().on_episode_start(env, episode)
 
 
 # env
-env = MonitorEpisodes(TimeLimit(CarFleet(), max_episode_steps=ep_len))
+env = MonitorEpisodes(TimeLimit(CarFleet(acc, n), max_episode_steps=ep_len))
 if SIM_TYPE == "mld":
     # mld mpc
     mld_mpc = MPCMldCent(cent_system, N)

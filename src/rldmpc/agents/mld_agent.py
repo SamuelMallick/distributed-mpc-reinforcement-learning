@@ -23,7 +23,7 @@ class MldAgent(Agent):
         this agent uses an mpc that does not inheret from the MPC baseclass."""
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.mpc = mpc
-        self.x_pred = None # stores most recent predicted state after being solved
+        self.x_pred = None  # stores most recent predicted state after being solved
 
     def evaluate(
         self,
@@ -90,9 +90,7 @@ class MldAgent(Agent):
         self.x_pred = x
         return u
 
-    def set_cost(
-        self, Q_x, Q_u, x_goal: np.ndarray = None, u_goal: np.ndarray = None
-    ):
+    def set_cost(self, Q_x, Q_u, x_goal: np.ndarray = None, u_goal: np.ndarray = None):
         """Set cost of the agents mpc-MIP as sum_k x(k)' * Q_x * x(k) + u(k)' * Q_u * u(k).
         Restricted to quadratic in the states and control.
         If x_goal or u_goal passed the cost uses (x-x_goal) and (u_goal)"""

@@ -26,9 +26,18 @@ logger.addHandler(console_handler)
 
 class SequentialMldCoordinator(MldAgent):
     """A coordinatoof MLD agents that solve their local problems in a sequence, communicating the soltuions to the next agent in sequence."""
-    def __init__(self, local_mpcs: List[MpcMld], nx_l: int, nu_l: int, Q_x_l: np.ndarray, Q_u_l: np.ndarray, sep: np.ndarray) -> None:
+
+    def __init__(
+        self,
+        local_mpcs: List[MpcMld],
+        nx_l: int,
+        nu_l: int,
+        Q_x_l: np.ndarray,
+        Q_u_l: np.ndarray,
+        sep: np.ndarray,
+    ) -> None:
         """Initialise the coordinator.
-        
+
         Parameters
         ----------
         local_mpcs: List[MpcMld]
