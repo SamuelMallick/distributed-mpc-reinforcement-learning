@@ -34,12 +34,16 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
         super().reset(seed=seed, options=options)
         starting_positions = [
             400 * np.random.random() for i in range(self.n)
-        ]  # starting positions between 0-50 m
-        self.x = np.tile(np.array([[0], [5]]), (self.n, 1))
+        ]  # starting positions between 0-400 m
+        starting_velocities = [
+            33 * np.random.random() + 2 for i in range(self.n) 
+        ]  # starting velocities between 2-35 ms-1
+        self.x = np.tile(np.array([[0], [0]]), (self.n, 1))
         for i in range(self.n):
-            IC = max(starting_positions)  # order the agents by starting distance
-            self.x[i * self.nx_l, :] = IC
-            starting_positions.remove(IC)
+            init_pos = max(starting_positions)  # order the agents by starting distance
+            self.x[i * self.nx_l, :] = init_pos
+            self.x[i * self.nx_l + 1, :] = starting_velocities[i]
+            starting_positions.remove(init_pos)
         return self.x, {}
 
     def get_stage_cost(

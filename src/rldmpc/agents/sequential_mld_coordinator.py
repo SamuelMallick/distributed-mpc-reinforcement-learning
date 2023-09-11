@@ -35,6 +35,7 @@ class SequentialMldCoordinator(MldAgent):
         Q_x_l: np.ndarray,
         Q_u_l: np.ndarray,
         sep: np.ndarray,
+        d_safe: float,
     ) -> None:
         """Initialise the coordinator.
 
@@ -52,6 +53,8 @@ class SequentialMldCoordinator(MldAgent):
             Quadratic penalty matrix for control effort.
         sep: np.ndarray
             Desired state seperation between tracked vehicles.
+        d_safe: float
+            Safe distance between vehicles.
         """
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.n = len(local_mpcs)
@@ -60,6 +63,7 @@ class SequentialMldCoordinator(MldAgent):
         self.Q_x_l = Q_x_l
         self.Q_u_l = Q_u_l
         self.sep = sep
+        self.d_safe = d_safe
         self.agents: list[MldAgent] = []
         for i in range(self.n):
             self.agents.append(MldAgent(local_mpcs[i]))
@@ -71,6 +75,10 @@ class SequentialMldCoordinator(MldAgent):
             if i != 0:
                 x_pred_prev = self.agents[i - 1].x_pred
                 x_goal = x_pred_prev + np.tile(self.sep, x_pred_prev.shape[1])
+                for k in range(x_pred_prev.shape[1] - 1):
+                    self.agents[i].mpc.safety_constraints[k].RHS = (
+                        x_pred_prev[0, [k]] - self.d_safe
+                    )
                 self.agents[i].set_cost(self.Q_x_l, self.Q_u_l, x_goal)
             u[i] = self.agents[i].get_control(xl)
         return np.vstack(u)

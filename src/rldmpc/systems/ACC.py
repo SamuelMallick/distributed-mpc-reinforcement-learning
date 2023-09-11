@@ -17,7 +17,6 @@ class ACC:
     Q_u_l = 0.1 * np.eye(nu_l)
 
     sep = np.array([[-50], [0]])  # desired seperation between vehicles states
-    d_safe = 0  # safe distance between cars
 
     mass = 800  # mass
     c_fric = 0.5  # viscous friction coefficient
@@ -33,7 +32,7 @@ class ACC:
     u_max = 1  # max throttle/brake
     a_acc = 2.5  # comfort acc
     a_dec = -2  # comfort dec
-    d_safe = 15  # safe pos
+    d_safe = 100  # safe pos
 
     # transmission rate for each of the 6 gears
     p = [14.203, 10.310, 7.407, 5.625, 4.083, 2.933]
@@ -232,9 +231,11 @@ class ACC:
             u_l = u[self.nu_l * i : self.nu_l * (i + 1), :]  # get local control
             for j in range(len(self.pwa_system["S"])):
                 if all(
-                    self.pwa_system["S"][j] @ x_l
-                    + self.pwa_system["R"][j] @ u_l
-                    <= self.pwa_system["T"][j] + np.array([[0], [1e-4]])    # buffer is to have one of the as a strict inequality
+                    self.pwa_system["S"][j] @ x_l + self.pwa_system["R"][j] @ u_l
+                    <= self.pwa_system["T"][j]
+                    + np.array(
+                        [[0], [1e-4]]
+                    )  # buffer is to have one of the as a strict inequality
                 ):
                     x_pwa = (
                         self.pwa_system["A"][j] @ x_l
@@ -269,7 +270,9 @@ if __name__ == "__main__":
     for t in range(test_len - 1):
         # step non linear
         x_nl[:, [t + 1]] = acc.step_car_dynamics_nl(x_nl[:, [t]], u[:, [t]], 2, acc.ts)
-        x_pwa[:, [t + 1]] = acc.step_car_dynamics_pwa(x_nl[:, [t]], u[:, [t]], 2, acc.ts)
+        x_pwa[:, [t + 1]] = acc.step_car_dynamics_pwa(
+            x_nl[:, [t]], u[:, [t]], 2, acc.ts
+        )
 
     _, axs = plt.subplots(2, 1, constrained_layout=True, sharex=True)
     axs[0].plot(x_nl[0, :], "r")
