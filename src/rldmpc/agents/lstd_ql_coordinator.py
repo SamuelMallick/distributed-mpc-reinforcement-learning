@@ -1,24 +1,27 @@
 from copy import deepcopy
-from mpcrl.agents.agent import ActType, ObsType, SymType
-from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
 from typing import Any, Collection, Dict, Literal, Optional, Union
+
+import casadi as cs
+import numpy as np
+import numpy.typing as npt
 from csnlp.wrappers import Mpc
 from gymnasium import Env
 from mpcrl import LstdQLearningAgent
-from mpcrl.agents.agent import ActType, ObsType
-import numpy.typing as npt
-import numpy as np
-import casadi as cs
+from mpcrl.agents.agent import ActType, ObsType, SymType
 from mpcrl.agents.lstd_q_learning import ExpType
+from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
+from mpcrl.core.exploration import (
+    EpsilonGreedyExploration,
+    ExplorationStrategy,
+    StepWiseExploration,
+)
 from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
-from mpcrl.core.schedulers import Scheduler
+from mpcrl.core.schedulers import ExponentialScheduler, Scheduler
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import Log, RecordUpdates
-from mpcrl.core.exploration import EpsilonGreedyExploration
-from mpcrl.core.schedulers import ExponentialScheduler
+
 from rldmpc.core.admm import AdmmCoordinator
 from rldmpc.core.consensus import ConsensusCoordinator
 from rldmpc.mpc.mpc_admm import MpcAdmm

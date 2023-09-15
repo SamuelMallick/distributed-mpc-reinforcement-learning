@@ -1,30 +1,31 @@
-from csnlp import Nlp
+import logging
 
-from gymnasium import Env
-import numpy as np
 import casadi as cs
+import gurobipy as gp
+import matplotlib.pyplot as plt
+import numpy as np
 import numpy.typing as npt
-from scipy.linalg import block_diag
-from mpcrl.wrappers.envs import MonitorEpisodes
+from ACC_env import CarFleet
+from csnlp import Nlp
+from gymnasium import Env
 from gymnasium.wrappers import TimeLimit
 from mpcrl.wrappers.agents import Log
-import logging
-from ACC_env import CarFleet
+from mpcrl.wrappers.envs import MonitorEpisodes
+from scipy.linalg import block_diag
+
 from rldmpc.agents.decent_mld_coordinator import DecentMldCoordinator
+from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
 from rldmpc.agents.mld_agent import MldAgent
 from rldmpc.agents.sequential_mld_coordinator import SequentialMldCoordinator
 from rldmpc.core.admm import g_map
-from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
-import matplotlib.pyplot as plt
 from rldmpc.mpc.mpc_mld import MpcMld
-import gurobipy as gp
 from rldmpc.mpc.mpc_switching import MpcSwitching
 from rldmpc.systems.ACC import ACC
 from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(1)
 
-SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
+SIM_TYPE = "seq_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
 n = 2  # num cars
 N = 10  # controller horizon
@@ -116,9 +117,7 @@ class LocalMpc(MpcSwitching):
 
             # safety constraints - if leader they are done later with parameters
             if not leader:
-                self.constraint(
-                    f"safety_{k}", x[0, [k]], "<=", x_c[0, [k]] - d_safe
-                )
+                self.constraint(f"safety_{k}", x[0, [k]], "<=", x_c[0, [k]] - d_safe)
 
         # objective
         if leader:
@@ -127,9 +126,7 @@ class LocalMpc(MpcSwitching):
                 temp = self.parameter(f"x_ref_{k}", (nx_l, 1))
                 self.leader_traj.append(temp)
                 self.fixed_pars_init[f"x_ref_{k}"] = np.zeros((nx_l, 1))
-                self.constraint(
-                    f"safety_{k}", x[0, [k]], "<=", temp[0] - d_safe
-                )
+                self.constraint(f"safety_{k}", x[0, [k]], "<=", temp[0] - d_safe)
             self.set_local_cost(
                 sum(
                     (x[:, [k]] - self.leader_traj[k] - sep).T
@@ -241,9 +238,7 @@ class MPCMldCent(MpcMld):
                 follow_state = leader_traj
                 # safe constraints for leader
                 for k in range(N):
-                    self.first_car_safe_constrs[k].RHS = (
-                        follow_state[0, [k]] - d_safe
-                    )
+                    self.first_car_safe_constrs[k].RHS = follow_state[0, [k]] - d_safe
             else:
                 # otherwise follow car infront (i-1)
                 follow_state = self.x[nx_l * (i - 1) : nx_l * (i), :]

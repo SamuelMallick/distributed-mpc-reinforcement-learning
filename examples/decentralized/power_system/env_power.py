@@ -2,15 +2,10 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import casadi as cs
 import gymnasium as gym
-
 import numpy as np
 import numpy.typing as npt
+from model_Hycon2 import get_cent_model, get_model_details, get_P_tie
 from scipy.linalg import block_diag
-from model_Hycon2 import (
-    get_cent_model,
-    get_model_details,
-    get_P_tie,
-)
 
 np.random.seed(1)
 
@@ -30,7 +25,7 @@ np.random.seed(1)
 
 
 class PowerSystem(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
-    """Discrete time network of four power system areas connected with tie lines."""
+    """Cont time network of four power system areas connected with tie lines."""
 
     A, B, L = get_cent_model(discrete=False)  # Get continuous centralised model
 

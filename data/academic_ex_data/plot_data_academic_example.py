@@ -1,9 +1,9 @@
 import pickle
+
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-import matplotlib
 
 # matplotlib.rcParams['mathtext.fontset'] = 'stix'
 # matplotlib.rcParams['font.family'] = 'STIXGeneral'

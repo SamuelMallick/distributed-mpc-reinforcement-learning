@@ -1,16 +1,18 @@
+import logging
 from typing import Any, List, Literal, Optional, Sequence, Union
+
+import casadi as cs
+import matplotlib.pyplot as plt
+import numpy as np
+import numpy.typing as npt
 from csnlp.wrappers import Mpc
 from gymnasium import Env
 from mpcrl import Agent
 from mpcrl.agents.agent import ActType, ObsType, SymType
-import numpy as np
-import casadi as cs
-import numpy.typing as npt
+
 from rldmpc.agents.pwa_agent import PwaAgent
 from rldmpc.core.admm import AdmmCoordinator
-import logging
 from rldmpc.mpc.mpc_admm import MpcAdmm
-import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

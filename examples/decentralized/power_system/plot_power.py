@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from model_Hycon2 import get_P_tie, get_model_details
+from model_Hycon2 import get_model_details, get_P_tie
 
 (
     n,

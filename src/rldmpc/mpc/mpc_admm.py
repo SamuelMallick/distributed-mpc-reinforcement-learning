@@ -1,4 +1,5 @@
 from typing import Literal, Optional, TypeVar
+
 import casadi as cs
 import numpy as np
 from csnlp.wrappers import Mpc

@@ -1,3 +1,4 @@
+import pickle
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import casadi as cs
@@ -12,17 +13,17 @@ from csnlp.util.math import quad_form
 from csnlp.wrappers import Mpc
 from gymnasium.wrappers import TimeLimit
 from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent
+from mpcrl.core.experience import ExperienceReplay
+from mpcrl.core.exploration import EpsilonGreedyExploration
+from mpcrl.core.schedulers import ExponentialScheduler
 from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
-from mpcrl.core.exploration import EpsilonGreedyExploration
-from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.schedulers import ExponentialScheduler
 from scipy.linalg import block_diag
+
 from rldmpc.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
 from rldmpc.cvxpy_system.admm import g_map
-from rldmpc.utils.discretisation import zero_order_hold, forward_euler, tustin
-import pickle
+from rldmpc.utils.discretisation import forward_euler, tustin, zero_order_hold
 
 np.random.seed(1)
 

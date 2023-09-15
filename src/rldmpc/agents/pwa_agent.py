@@ -1,8 +1,9 @@
 from typing import Collection, List, Literal, Optional, Union
+
+import casadi as cs
+import numpy as np
 from csnlp import Nlp
 from csnlp.wrappers import Mpc
-import numpy as np
-import casadi as cs
 from mpcrl.agents.agent import ActType, Agent, ObsType, SymType
 
 

@@ -1,8 +1,9 @@
-import gymnasium as gym
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
-import numpy.typing as npt
-import numpy as np
+
 import casadi as cs
+import gymnasium as gym
+import numpy as np
+import numpy.typing as npt
 
 from rldmpc.systems.ACC import ACC
 
@@ -36,7 +37,7 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             400 * np.random.random() for i in range(self.n)
         ]  # starting positions between 0-400 m
         starting_velocities = [
-            33 * np.random.random() + 2 for i in range(self.n) 
+            33 * np.random.random() + 2 for i in range(self.n)
         ]  # starting velocities between 2-35 ms-1
         self.x = np.tile(np.array([[0], [0]]), (self.n, 1))
         for i in range(self.n):
@@ -74,7 +75,7 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
 
         action = action.full()
         r = self.get_stage_cost(self.x, action)
-        x_new = self.acc.step_car_dynamics_pwa(self.x, action, self.n, self.acc.ts)
+        x_new = self.acc.step_car_dynamics_nl(self.x, action, self.n, self.acc.ts)
         self.x = x_new
 
         self.step_counter += 1

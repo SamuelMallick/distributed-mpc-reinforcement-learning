@@ -1,8 +1,10 @@
 from typing import List, Literal, Optional
-from csnlp.wrappers.wrapper import Nlp
-from rldmpc.mpc.mpc_admm import MpcAdmm
-import numpy as np
+
 import casadi as cs
+import numpy as np
+from csnlp.wrappers.wrapper import Nlp
+
+from rldmpc.mpc.mpc_admm import MpcAdmm
 
 
 class MpcSwitching(MpcAdmm):

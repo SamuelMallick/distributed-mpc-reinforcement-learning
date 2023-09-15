@@ -1,7 +1,8 @@
 from typing import List
-from mpcrl import Agent
-import numpy as np
+
 import casadi as cs
+import numpy as np
+from mpcrl import Agent
 
 
 def g_map(Adj: np.ndarray):

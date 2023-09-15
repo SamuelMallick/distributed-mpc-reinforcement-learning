@@ -1,12 +1,13 @@
 from typing import Any, Collection, Iterable, List, Literal, Optional, Sequence, Union
+
 import casadi as cs
+import numpy as np
+import numpy.typing as npt
 from csnlp import Solution
 from csnlp.wrappers import Mpc
 from gymnasium import Env
 from mpcrl import Agent
-import numpy as np
 from mpcrl.agents.agent import ActType, ObsType
-import numpy.typing as npt
 from mpcrl.core.exploration import ExplorationStrategy, NoExploration
 
 from rldmpc.mpc.mpc_mld import MpcMld

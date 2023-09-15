@@ -1,5 +1,5 @@
-import numpy as np
 import cvxpy as cp
+import numpy as np
 
 n = 2
 n_l = 2

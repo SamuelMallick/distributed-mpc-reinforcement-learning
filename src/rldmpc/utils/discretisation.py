@@ -1,9 +1,10 @@
-from typing import Tuple
-import numpy as np
-from scipy.signal import cont2discrete
-from scipy.linalg import expm
-import casadi as cs
 from math import factorial
+from typing import Tuple
+
+import casadi as cs
+import numpy as np
+from scipy.linalg import expm
+from scipy.signal import cont2discrete
 
 
 def forward_euler(
@@ -46,6 +47,10 @@ def tustin(A: np.ndarray, B: np.ndarray, ts: float) -> Tuple[np.ndarray, np.ndar
     D = np.array([[0]])
     Ad, Bd, Cd, Dd, _ = cont2discrete((A, B, C, D), ts, method="bilinear")
     return Ad, Bd
+
+
+def forward_euler_nl():
+    pass
 
 
 if __name__ == "__main__":

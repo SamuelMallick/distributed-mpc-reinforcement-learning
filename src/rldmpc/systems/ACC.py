@@ -1,6 +1,7 @@
 import gurobipy as gp
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from rldmpc.utils.discretisation import forward_euler
 
 # adaptive cruise control system. Single agent system outlined in:

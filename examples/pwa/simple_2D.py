@@ -1,25 +1,26 @@
 # Modifying the simple 2D system from David Mayne's
 # 2003 paper on PWA systems, adapted to be a network
 
-from csnlp import Nlp
-import gymnasium as gym
-import numpy as np
-import casadi as cs
-import numpy.typing as npt
+import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
-from scipy.linalg import block_diag
-from mpcrl.wrappers.envs import MonitorEpisodes
+
+import casadi as cs
+import gymnasium as gym
+import matplotlib.pyplot as plt
+import numpy as np
+import numpy.typing as npt
+from csnlp import Nlp
 from gymnasium.wrappers import TimeLimit
 from mpcrl.wrappers.agents import Log, RecordUpdates
-import logging
+from mpcrl.wrappers.envs import MonitorEpisodes
+from scipy.linalg import block_diag
+
+from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
 from rldmpc.agents.mld_agent import MldAgent
 from rldmpc.agents.sqp_admm_coordinator import SqpAdmmCoordinator
-from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.core.admm import g_map
-from rldmpc.agents.g_admm_coordinator import GAdmmCoordinator
-import matplotlib.pyplot as plt
+from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.mpc.mpc_mld import MpcMld
-
 from rldmpc.mpc.mpc_switching import MpcSwitching
 from rldmpc.utils.pwa_models import cent_from_dist
 

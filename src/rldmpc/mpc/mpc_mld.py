@@ -1,9 +1,10 @@
+import logging
 from typing import List
+
 import casadi as cs
+import gurobipy as gp
 import numpy as np
 from csnlp.wrappers import Mpc
-import gurobipy as gp
-import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.CRITICAL)
