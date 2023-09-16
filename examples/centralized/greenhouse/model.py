@@ -26,6 +26,7 @@ d = np.load("examples/centralized/greenhouse/disturbances.npy")
 def get_model_details():
     return nx, nu, nd, ts
 
+
 def get_disturbance_profile(init_day: int):
     # an extra days worth added to the profile for the prediction horizon
     return d[
@@ -35,8 +36,10 @@ def get_disturbance_profile(init_day: int):
         * time_steps_per_day,
     ]
 
+
 def get_control_bounds():
     return u_min, u_max, du_lim
+
 
 def get_y_min(d):
     if d[0] < 10:
@@ -52,7 +55,7 @@ def get_y_max(d):
         return np.array([[1e6], [1.6], [20], [70]])
 
 
-p = [
+p_true = [
     0.544,
     2.65e-7,
     53,
@@ -85,50 +88,36 @@ p = [
 
 
 def generate_perturbed_p():
-    # Define the desired mean and covariance matrix
-    mean = np.asarray(p)  # Mean vector is real vals
-    cov_matrix = 0.05*np.eye(len(p))  # Covariance matrix
-
-    # Generate samples from a uniform distribution over the unit hypercube
-    num_samples = 1  # Number of samples
-    uniform_samples = np.random.rand(num_samples, len(mean))
-
-    # Transform the uniform samples to have the desired mean and covariance
-    # Use the Cholesky decomposition of the covariance matrix
-    cholesky_matrix = np.linalg.cholesky(cov_matrix)
-    p_hat = np.dot(uniform_samples, cholesky_matrix.T) + mean
+    p_hat = p_true.copy()
+    for i in range(len(p_hat)):
+        max_pert = p_hat[i]*0.5
+        p_hat[i] = p_hat[i] + np.random.uniform(-max_pert, max_pert)
 
     return p_hat
 
-
 # continuos time model
-# TODO: make all sub functions take p as an input.
-# Then when you want the real dynamics (rk4 OR df) you use a different function called df_real or rk4_real
-# Then make a function multi_sample_dynamics(x_ext, u, d, Ns) which takes the extended state x = [x_1, x_2, ...], and for each sample computes
-# the update x_1+ = rk4(x1, u, d, p_hat) for a NEW p_hat.
-# however the same control and disturbances are used.
 
 # sub-functions within dynamics
-def psi(x, d):
+def psi(x, d, p):
     return p[3] * d[0] + (-p[4] * x[2] ** 2 + p[5] * x[2] - p[6]) * (x[1] - p[7])
 
 
-def phi_phot_c(x, d):
+def phi_phot_c(x, d, p):
     return (
         (1 - cs.exp(-p[2] * x[0]))
         * (p[3] * d[0] * (-p[4] * x[2] ** 2 + p[5] * x[2] - p[6]) * (x[1] - p[7]))
-    ) / (psi(x, d))
+    ) / (psi(x, d, p))
 
 
-def phi_vent_c(x, u, d):
+def phi_vent_c(x, u, d, p):
     return (u[1] * 1e-3 + p[10]) * (x[1] - d[1])
 
 
-def phi_vent_h(x, u, d):
+def phi_vent_h(x, u, d, p):
     return (u[1] * 1e-3 + p[10]) * (x[3] - d[3])
 
 
-def phi_trasnp_h(x):
+def phi_trasnp_h(x, p):
     return (
         p[1]
         * (1 - cs.exp(-p[2] * x[0]))
@@ -140,31 +129,31 @@ def phi_trasnp_h(x):
     )
 
 
-def df(x, u, d):
+def df(x, u, d, p):
     """Continuous derivative of state d_dot = df(x, u, d)/dt"""
-    dx1 = p[0] * phi_phot_c(x, d) - p[1] * x[0] * 2 ** (x[2] / 10 - 5 / 2)
+    dx1 = p[0] * phi_phot_c(x, d, p) - p[1] * x[0] * 2 ** (x[2] / 10 - 5 / 2)
     dx2 = (1 / p[8]) * (
-        -phi_phot_c(x, d)
+        -phi_phot_c(x, d, p)
         + p[9] * x[0] * 2 ** (x[2] / 10 - 5 / 2)
         + u[0] * 1e-6
-        - phi_vent_c(x, u, d)
+        - phi_vent_c(x, u, d, p)
     )
     dx3 = (1 / p[15]) * (
         u[2] - (p[16] * u[1] * 1e-3 + p[17]) * (x[2] - d[2]) + p[18] * d[0]
     )
-    dx4 = (1 / p[19]) * (phi_trasnp_h(x) - phi_vent_h(x, u, d))
+    dx4 = (1 / p[19]) * (phi_trasnp_h(x, p) - phi_vent_h(x, u, d, p))
     return cs.vertcat(dx1, dx2, dx3, dx4)
 
 
-def rk4_step(x, u, d):
-    k1 = df(x, u, d)
-    k2 = df(x + (ts / 2) * k1, u, d)
-    k3 = df(x + (ts / 2) * k2, u, d)
-    k4 = df(x + ts * k3, u, d)
+def rk4_step(x, u, d, p):
+    k1 = df(x, u, d, p)
+    k2 = df(x + (ts / 2) * k1, u, d, p)
+    k3 = df(x + (ts / 2) * k2, u, d, p)
+    k4 = df(x + ts * k3, u, d, p)
     return x + (ts / 6) * (k1 + 2 * k2 + 2 * k3 + k4)
 
 
-def output(x):
+def output(x, p):
     """Output function of state y = output(x)"""
     y1 = 1e3 * x[0]
     y2 = ((1e3 * p[11] * (x[2] + p[12])) / (p[13] * p[14])) * x[1]
@@ -176,3 +165,45 @@ def output(x):
     # add noise to measurement
     noise = np.random.normal(mean, sd, (nx, 1))
     return cs.vertcat(y1, y2, y3, y4) + noise
+
+
+def df_real(x, u, d):
+    """Get continuous differential equation for state with accurate parameters"""
+    return df(x, u, d, p_true)
+
+
+def rk4_step_real(x, u, d):
+    """Get discrete RK4 difference equation for state with accurate parameters"""
+    return rk4_step(x, u, d, p_true)
+
+
+def output_real(x):
+    return output(x, p_true)
+
+
+p_hat_list = []
+
+
+def multi_sample_rk4_step(x, u, d, Ns):
+    """Computes the dynamics update for Ns copies of the state x, with a sampled for each"""
+    x_plus = cs.SX.zeros(x.shape)
+    for i in range(Ns):
+        p_hat_list.append(generate_perturbed_p())
+        #p_hat_list.append(p_true)
+        x_i = x[nx * i : nx * (i + 1), :]
+        x_i_plus = rk4_step(x_i, u, d, p_hat_list[i])
+        x_plus[nx * i : nx * (i + 1), :] = x_i_plus
+    return x_plus
+
+
+def multi_sample_output(x, Ns):
+    if len(p_hat_list) == 0:
+        raise RuntimeError(
+            "P samples must be generated by setting dynamics with multi_sample_rk4_step before using multi_sample_output."
+        )
+    y = cs.SX.zeros(x.shape)
+    for i in range(Ns):
+        x_i = x[nx * i : nx * (i + 1), :]
+        y_i = output(x_i, p_hat_list[i])
+        y[nx * i : nx * (i + 1), :] = y_i
+    return y

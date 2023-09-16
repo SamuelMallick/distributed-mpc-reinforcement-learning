@@ -7,7 +7,7 @@ from mpcrl import Agent, LstdQLearningAgent
 import numpy as np
 import numpy.typing as npt
 from model import (
-    df,
+    df_real,
     get_disturbance_profile,
     get_model_details,
     get_y_min,
@@ -39,7 +39,7 @@ class LettuceGreenHouse(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floatin
         u = cs.SX.sym("u", (self.nu, 1))
         d = cs.SX.sym("d", (self.nd, 1))
         p = cs.vertcat(u, d)
-        x_new = df(x, u, d)
+        x_new = df_real(x, u, d)
         ode = {"x": x, "p": p, "ode": x_new}
         self.integrator = cs.integrator(
             "env_integrator",
@@ -77,7 +77,6 @@ class LettuceGreenHouse(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floatin
             p=cs.vertcat(action, self.disturbance_profile[:, [self.step_counter]]),
         )["xf"]
         # x_new = rk4_step(self.x, action, self.disturbance_profile[:, [self.step_counter]])
-        # TODO add in model uncertainty in step
         model_uncertainty = np.random.normal(self.mean, self.sd, (self.nx, 1))
         self.x = x_new + model_uncertainty
         self.step_counter += 1
@@ -106,4 +105,30 @@ class GreenhouseAgent(Agent):
         for k in range(self.V.prediction_horizon + 1):
             self.fixed_parameters[f"y_min_{k}"] = get_y_min(d_pred[:, [k]])
             self.fixed_parameters[f"y_max_{k}"] = get_y_max(d_pred[:, [k]])
+        return super().on_timestep_end(env, episode, timestep)
+    
+class GreenhouseSampleAgent(Agent):
+    # set the disturbance at start of episode and each new timestep
+    def on_episode_start(self, env: Env, episode: int) -> None:
+        d_pred = env.disturbance_profile[:, : self.V.prediction_horizon + 1]
+        self.fixed_parameters["d"] = d_pred[:, :-1]
+
+        Ns = self.V.Ns
+        # then we use the first entry of the predicted disturbance to determine y bounds
+        for k in range(self.V.prediction_horizon + 1):
+            self.fixed_parameters[f"y_min_{k}"] = cs.vertcat(*[get_y_min(d_pred[:, [k]])]*Ns)
+            self.fixed_parameters[f"y_max_{k}"] = cs.vertcat(*[get_y_max(d_pred[:, [k]])]*Ns)
+        return super().on_episode_start(env, episode)
+
+    def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
+        d_pred = env.disturbance_profile[
+            :, timestep : (timestep + self.V.prediction_horizon + 1)
+        ]
+        self.fixed_parameters["d"] = d_pred[:, :-1]
+
+        Ns = self.V.Ns
+        # then we use the first entry of the predicted disturbance to determine y bounds
+        for k in range(self.V.prediction_horizon + 1):
+            self.fixed_parameters[f"y_min_{k}"] = cs.vertcat(*[get_y_min(d_pred[:, [k]])]*Ns)
+            self.fixed_parameters[f"y_max_{k}"] = cs.vertcat(*[get_y_max(d_pred[:, [k]])]*Ns)
         return super().on_timestep_end(env, episode, timestep)
