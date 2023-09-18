@@ -22,6 +22,8 @@ from model import (
     get_model_details,
     output_real,
     rk4_step_real,
+    get_y_min,
+    get_y_max
 )
 from mpcrl import LearnableParameter, LearnableParametersDict, LstdQLearningAgent
 from mpcrl.core.experience import ExperienceReplay
@@ -31,14 +33,15 @@ from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 
+np.random.seed(69)
+
 SYM_TYPE = "sample" # options: "nom", "sample"
 
 nx, nu, nd, ts = get_model_details()
 u_min, u_max, du_lim = get_control_bounds()
 
 c_u = [10, 1, 1]  # penalty on each control signal
-# c_u = [1, 0.1, 0.1]  # penalty on each control signal
-c_y = 1e3  # reward on yield
+c_y = 10e3  # reward on yield
 
 
 class NominalMpc(Mpc[cs.SX]):
@@ -196,14 +199,14 @@ if SYM_TYPE == "nom":
         log_frequencies={"on_timestep_end": 1},
     )
 elif SYM_TYPE == "sample":
-    sample_mpc = SampleBasedMpc(Ns=1)
+    sample_mpc = SampleBasedMpc(Ns=5)
     agent = Log(
         GreenhouseSampleAgent(sample_mpc, {}),
         level=logging.DEBUG,
         log_frequencies={"on_timestep_end": 1},
     )
 
-days = 40
+days = 2
 ep_len = days * 24 * 4  # 40 days of 15 minute timesteps
 env = MonitorEpisodes(TimeLimit(LettuceGreenHouse(), max_episode_steps=int(ep_len)))
 agent.evaluate(env=env, episodes=1, seed=1, raises=False)
@@ -219,16 +222,31 @@ else:
 
 print(f"Return = {sum(R.squeeze())}")
 
+# generate output
 y = np.asarray([output_real(X[k, :]) for k in range(X.shape[0])]).squeeze()
+
+# get bounds
+d = env.disturbance_profile
+y_min = np.zeros((nx, ep_len))
+y_max = np.zeros((nx, ep_len))
+for t in range(ep_len):
+    y_min[:, [t]] = get_y_min(d[:, [t]])
+    y_max[:, [t]] = get_y_max(d[:, [t]])
+
 _, axs = plt.subplots(4, 1, constrained_layout=True, sharex=True)
 for i in range(4):
     axs[i].plot(X[:, i])
 _, axs = plt.subplots(4, 1, constrained_layout=True, sharex=True)
 for i in range(4):
     axs[i].plot(y[:, i])
+    axs[i].plot(y_min[i, :], color = 'black')
+    if i != 0:
+        axs[i].plot(y_max[i, :], color = 'r')
 _, axs = plt.subplots(3, 1, constrained_layout=True, sharex=True)
 for i in range(3):
     axs[i].plot(U[:, i])
+    axs[i].axhline(u_min[i], color = 'black')
+    axs[i].axhline(u_max[i], color = 'r')
 _, axs = plt.subplots(4, 1, constrained_layout=True, sharex=True)
 for i in range(4):
     axs[i].plot(env.disturbance_profile[i, : days * 24 * 4])

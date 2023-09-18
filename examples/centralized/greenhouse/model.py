@@ -88,11 +88,17 @@ p_true = [
 
 
 def generate_perturbed_p():
+    #cv = 0.05*np.eye(len(p_true))
+    #chol = np.linalg.cholesky(cv)
+    #rand_nums = np.random.randn(len(p_true), 1)
+    #p_hat = chol@rand_nums + np.asarray(p_true).reshape(rand_nums.shape)
+    #p_hat[p_hat < 0] = 0    # replace negative vals with zero
+    #return p_hat[:, 0]
+
     p_hat = p_true.copy()
     for i in range(len(p_hat)):
-        max_pert = p_hat[i]*0.5
+        max_pert = p_hat[i]*0.2
         p_hat[i] = p_hat[i] + np.random.uniform(-max_pert, max_pert)
-
     return p_hat
 
 # continuos time model
@@ -119,11 +125,11 @@ def phi_vent_h(x, u, d, p):
 
 def phi_trasnp_h(x, p):
     return (
-        p[1]
+        p[20]
         * (1 - cs.exp(-p[2] * x[0]))
         * (
             ((p[21]) / (p[22] * (x[2] + p[23])))
-            * (np.exp((p[24] * x[2]) / (x[2] + p[25])))
+            * (cs.exp((p[24] * x[2]) / (x[2] + p[25])))
             - x[3]
         )
     )
@@ -181,17 +187,16 @@ def output_real(x):
     return output(x, p_true)
 
 
+# robust sample based dynamics and output
 p_hat_list = []
-
-
 def multi_sample_rk4_step(x, u, d, Ns):
     """Computes the dynamics update for Ns copies of the state x, with a sampled for each"""
     x_plus = cs.SX.zeros(x.shape)
     for i in range(Ns):
         p_hat_list.append(generate_perturbed_p())
-        #p_hat_list.append(p_true)
         x_i = x[nx * i : nx * (i + 1), :]
         x_i_plus = rk4_step(x_i, u, d, p_hat_list[i])
+        #x_i_plus = rk4_step(x_i, u, d, p_true)
         x_plus[nx * i : nx * (i + 1), :] = x_i_plus
     return x_plus
 
@@ -205,5 +210,6 @@ def multi_sample_output(x, Ns):
     for i in range(Ns):
         x_i = x[nx * i : nx * (i + 1), :]
         y_i = output(x_i, p_hat_list[i])
+        #y_i = output(x_i, p_true)
         y[nx * i : nx * (i + 1), :] = y_i
     return y

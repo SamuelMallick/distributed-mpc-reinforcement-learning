@@ -16,9 +16,6 @@ from model import (
     rk4_step,
 )
 
-np.random.seed(1)
-
-
 class LettuceGreenHouse(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Continuous time environment for a luttuce greenhouse."""
 
