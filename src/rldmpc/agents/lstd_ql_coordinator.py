@@ -11,11 +11,8 @@ from mpcrl.agents.agent import ActType, ObsType, SymType
 from mpcrl.agents.lstd_q_learning import ExpType
 from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import (
-    EpsilonGreedyExploration,
-    ExplorationStrategy,
-    StepWiseExploration,
-)
+from mpcrl.core.exploration import (EpsilonGreedyExploration,
+                                    ExplorationStrategy, StepWiseExploration)
 from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.schedulers import ExponentialScheduler, Scheduler
