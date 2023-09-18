@@ -9,10 +9,15 @@ from csnlp.wrappers import Mpc
 from csnlp.wrappers.wrapper import Nlp
 from env_power import PowerSystem
 from gymnasium.wrappers import TimeLimit
-from model_Hycon2 import (get_learnable_dynamics, get_learnable_dynamics_local,
-                          get_learned_P_tie_init, get_learned_pars_init_list,
-                          get_model_details, get_P_tie_init,
-                          get_pars_init_list)
+from model_Hycon2 import (
+    get_learnable_dynamics,
+    get_learnable_dynamics_local,
+    get_learned_P_tie_init,
+    get_learned_pars_init_list,
+    get_model_details,
+    get_P_tie_init,
+    get_pars_init_list,
+)
 from mpcrl import LearnableParameter, LearnableParametersDict
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.exploration import EpsilonGreedyExploration

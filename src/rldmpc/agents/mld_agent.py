@@ -1,5 +1,4 @@
-from typing import (Any, Collection, Iterable, List, Literal, Optional,
-                    Sequence, Union)
+from typing import Any, Collection, Iterable, List, Literal, Optional, Sequence, Union
 
 import casadi as cs
 import numpy as np
