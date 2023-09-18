@@ -2,19 +2,19 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import casadi as cs
 import gymnasium as gym
-from gymnasium import Env
-from mpcrl import Agent, LstdQLearningAgent
 import numpy as np
 import numpy.typing as npt
+from gymnasium import Env
 from model import (
     df_real,
     get_disturbance_profile,
     get_model_details,
-    get_y_min,
     get_y_max,
-    output,
-    rk4_step,
+    get_y_min,
+    output_real,
 )
+from mpcrl import Agent, LstdQLearningAgent
+
 
 class LettuceGreenHouse(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
     """Continuous time environment for a luttuce greenhouse."""
@@ -22,6 +22,12 @@ class LettuceGreenHouse(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floatin
     nx, nu, nd, ts = get_model_details()
     disturbance_profile = get_disturbance_profile(init_day=0)
     step_counter = 0
+
+    # cost constants
+    c_u = [10, 1, 1]  # penalty on each control signal
+    c_y = 10e3  # reward on yield
+    yield_step = 3839  # 191
+    w = np.array([100, 100, 100, 100])  # penalty on constraint violations
 
     # noise terms
     mean = np.zeros((nx, 1))
@@ -62,7 +68,17 @@ class LettuceGreenHouse(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floatin
     def get_stage_cost(
         self, state: npt.NDArray[np.floating], action: npt.NDArray[np.floating]
     ) -> float:
-        return 0.0
+        reward = 0.0
+        y = output_real(state)
+        y_max = get_y_max(self.disturbance_profile[:, [self.step_counter]])
+        y_min = get_y_min(self.disturbance_profile[:, [self.step_counter]])
+        for i in range(self.nu):
+            reward += self.c_u[i] * action[i]
+        reward += self.w @ np.maximum(0, y_min - y)
+        reward += self.w @ np.maximum(0, y - y_max)
+        if self.step_counter == self.yield_step:
+            reward -= self.c_y * y[0]
+        return reward
 
     def step(
         self, action: cs.DM
@@ -103,7 +119,33 @@ class GreenhouseAgent(Agent):
             self.fixed_parameters[f"y_min_{k}"] = get_y_min(d_pred[:, [k]])
             self.fixed_parameters[f"y_max_{k}"] = get_y_max(d_pred[:, [k]])
         return super().on_timestep_end(env, episode, timestep)
-    
+
+
+class GreenhouseLearningAgent(LstdQLearningAgent):
+    # set the disturbance at start of episode and each new timestep
+    def on_episode_start(self, env: Env, episode: int) -> None:
+        d_pred = env.disturbance_profile[:, : self.V.prediction_horizon + 1]
+        self.fixed_parameters["d"] = d_pred[:, :-1]
+
+        # then we use the first entry of the predicted disturbance to determine y bounds
+        for k in range(self.V.prediction_horizon + 1):
+            self.fixed_parameters[f"y_min_{k}"] = get_y_min(d_pred[:, [k]])
+            self.fixed_parameters[f"y_max_{k}"] = get_y_max(d_pred[:, [k]])
+        return super().on_episode_start(env, episode)
+
+    def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
+        d_pred = env.disturbance_profile[
+            :, timestep : (timestep + self.V.prediction_horizon + 1)
+        ]
+        self.fixed_parameters["d"] = d_pred[:, :-1]
+
+        # then we use the first entry of the predicted disturbance to determine y bounds
+        for k in range(self.V.prediction_horizon + 1):
+            self.fixed_parameters[f"y_min_{k}"] = get_y_min(d_pred[:, [k]])
+            self.fixed_parameters[f"y_max_{k}"] = get_y_max(d_pred[:, [k]])
+        return super().on_timestep_end(env, episode, timestep)
+
+
 class GreenhouseSampleAgent(Agent):
     # set the disturbance at start of episode and each new timestep
     def on_episode_start(self, env: Env, episode: int) -> None:
@@ -113,8 +155,12 @@ class GreenhouseSampleAgent(Agent):
         Ns = self.V.Ns
         # then we use the first entry of the predicted disturbance to determine y bounds
         for k in range(self.V.prediction_horizon + 1):
-            self.fixed_parameters[f"y_min_{k}"] = cs.vertcat(*[get_y_min(d_pred[:, [k]])]*Ns)
-            self.fixed_parameters[f"y_max_{k}"] = cs.vertcat(*[get_y_max(d_pred[:, [k]])]*Ns)
+            self.fixed_parameters[f"y_min_{k}"] = cs.vertcat(
+                *[get_y_min(d_pred[:, [k]])] * Ns
+            )
+            self.fixed_parameters[f"y_max_{k}"] = cs.vertcat(
+                *[get_y_max(d_pred[:, [k]])] * Ns
+            )
         return super().on_episode_start(env, episode)
 
     def on_timestep_end(self, env: Env, episode: int, timestep: int) -> None:
@@ -126,6 +172,10 @@ class GreenhouseSampleAgent(Agent):
         Ns = self.V.Ns
         # then we use the first entry of the predicted disturbance to determine y bounds
         for k in range(self.V.prediction_horizon + 1):
-            self.fixed_parameters[f"y_min_{k}"] = cs.vertcat(*[get_y_min(d_pred[:, [k]])]*Ns)
-            self.fixed_parameters[f"y_max_{k}"] = cs.vertcat(*[get_y_max(d_pred[:, [k]])]*Ns)
+            self.fixed_parameters[f"y_min_{k}"] = cs.vertcat(
+                *[get_y_min(d_pred[:, [k]])] * Ns
+            )
+            self.fixed_parameters[f"y_max_{k}"] = cs.vertcat(
+                *[get_y_max(d_pred[:, [k]])] * Ns
+            )
         return super().on_timestep_end(env, episode, timestep)
