@@ -59,13 +59,16 @@ class CarFleet(gym.Env[npt.NDArray[np.floating], npt.NDArray[np.floating]]):
             if i == 0:
                 # first car tracks leader
                 follow_state = self.leader_state[:, [self.step_counter]]
+                cost += (local_state - follow_state).T @ self.Q_x_l @ (
+                    local_state - follow_state
+                ) + local_action.T @ self.Q_u_l @ local_action
             else:
                 # other cars follow the next car
                 follow_state = state[self.nx_l * (i - 1) : self.nx_l * (i), :]
 
-            cost += (local_state - follow_state - self.sep).T @ self.Q_x_l @ (
-                local_state - follow_state - self.sep
-            ) + local_action.T @ self.Q_u_l @ local_action
+                cost += (local_state - follow_state - self.sep).T @ self.Q_x_l @ (
+                    local_state - follow_state - self.sep
+                ) + local_action.T @ self.Q_u_l @ local_action
         return cost
 
     def step(

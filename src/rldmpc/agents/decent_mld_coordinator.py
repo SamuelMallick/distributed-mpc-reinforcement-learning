@@ -17,8 +17,6 @@ from rldmpc.core.admm import AdmmCoordinator
 from rldmpc.mpc.mpc_admm import MpcAdmm
 from rldmpc.mpc.mpc_mld import MpcMld
 
-ADMM_DEBUG_PLOT = False
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 console_handler = logging.StreamHandler()
