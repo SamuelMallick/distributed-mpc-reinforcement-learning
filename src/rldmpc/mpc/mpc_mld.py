@@ -225,6 +225,11 @@ class MpcMld:
             ) + (self.u[:, k] - u_goal[:, k].T) @ Q_u @ (
                 self.u[:, [k]] - u_goal[:, [k]]
             )
+        obj += (
+            (self.x[:, self.N] - x_goal[:, self.N].T)
+            @ Q_x
+            @ (self.x[:, [self.N]] - x_goal[:, [self.N]])
+        )
         self.mpc_model.setObjective(obj, gp.GRB.MINIMIZE)
 
     def solve_mpc(self, state):
@@ -235,7 +240,7 @@ class MpcMld:
             x = self.x.X
         else:
             u = np.zeros((self.m, self.N))
-            x = np.zeros((self.n, self.N))
+            x = np.zeros((self.n, self.N + 1))
             logger.info("Infeasible")
 
         runtime = self.mpc_model.Runtime

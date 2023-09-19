@@ -2,6 +2,7 @@ import logging
 from typing import Any, Collection, List, Literal, Optional, Sequence, Union
 
 import casadi as cs
+import gurobipy as gp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
@@ -38,6 +39,8 @@ class SequentialMldCoordinator(MldAgent):
         Q_u_l: np.ndarray,
         sep: np.ndarray,
         d_safe: float,
+        w: float,
+        N: int,
     ) -> None:
         """Initialise the coordinator.
 
@@ -57,6 +60,10 @@ class SequentialMldCoordinator(MldAgent):
             Desired state seperation between tracked vehicles.
         d_safe: float
             Safe distance between vehicles.
+        w: float
+            Penalty on slack var s in cost.
+        N: int
+            Prediction horizon.
         """
         self._exploration: ExplorationStrategy = NoExploration()  # to keep compatable
         self.n = len(local_mpcs)
@@ -66,6 +73,8 @@ class SequentialMldCoordinator(MldAgent):
         self.Q_u_l = Q_u_l
         self.sep = sep
         self.d_safe = d_safe
+        self.w = w
+        self.N = N
         self.agents: list[MldAgent] = []
         for i in range(self.n):
             self.agents.append(MldAgent(local_mpcs[i]))
@@ -76,11 +85,43 @@ class SequentialMldCoordinator(MldAgent):
             xl = state[self.nx_l * i : self.nx_l * (i + 1), :]
             if i != 0:
                 x_pred_prev = self.agents[i - 1].x_pred
-                x_goal = x_pred_prev + np.tile(self.sep, x_pred_prev.shape[1])
-                for k in range(x_pred_prev.shape[1] - 1):
+                x_goal = x_pred_prev + np.tile(self.sep, self.N + 1)
+                for k in range(self.N + 1):
                     self.agents[i].mpc.safety_constraints[k].RHS = (
                         x_pred_prev[0, [k]] - self.d_safe
                     )
+
+                # set cost of agent
                 self.agents[i].set_cost(self.Q_x_l, self.Q_u_l, x_goal)
+                obj = 0
+                for k in range(self.N):
+                    obj += (
+                        (self.agents[i].mpc.x[:, k] - x_pred_prev[:, k] - self.sep.T)
+                        @ self.Q_x_l
+                        @ (
+                            self.agents[i].mpc.x[:, [k]]
+                            - x_pred_prev[:, [k]]
+                            - self.sep
+                        )
+                        + self.agents[i].mpc.u[:, k]
+                        @ self.Q_u_l
+                        @ self.agents[i].mpc.u[:, [k]]
+                        + self.w * self.agents[i].mpc.s[:, [k]]
+                    )
+                obj += (
+                    self.agents[i].mpc.x[:, self.N]
+                    - x_pred_prev[:, self.N]
+                    - self.sep.T
+                ) @ self.Q_x_l @ (
+                    self.agents[i].mpc.x[:, [self.N]]
+                    - x_pred_prev[:, [self.N]]
+                    - self.sep
+                ) + self.w * self.agents[
+                    i
+                ].mpc.s[
+                    :, [self.N]
+                ]
+                self.agents[i].mpc.mpc_model.setObjective(obj, gp.GRB.MINIMIZE)
+
             u[i] = self.agents[i].get_control(xl)
         return np.vstack(u)
