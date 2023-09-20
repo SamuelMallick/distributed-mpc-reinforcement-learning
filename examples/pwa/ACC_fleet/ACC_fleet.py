@@ -25,13 +25,13 @@ from rldmpc.utils.pwa_models import cent_from_dist
 
 np.random.seed(1)
 
-SIM_TYPE = "seq_mld"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
+SIM_TYPE = "g_admm"  # options: "mld", "g_admm", "sqp_admm", "decent_mld", "seq_mld"
 
-n = 5  # num cars
-N = 10  # controller horizon
+n = 2  # num cars
+N = 5  # controller horizon
 w = 100  # slack variable penalty
 
-ep_len = 50  # length of episode (sim len)
+ep_len = 100  # length of episode (sim len)
 Adj = np.zeros((n, n))  # adjacency matrix
 if n > 1:
     for i in range(n):  # make it chain coupling
@@ -97,6 +97,10 @@ class LocalMpc(MpcSwitching):
             nu_l,
         )
 
+        s, _, _ = self.variable(
+            "s", (1, N + 1), lb=0
+        )  # slack var for distance constraint
+
         x_c_list = (
             []
         )  # store the bits of x that are couplings in a list for ease of access
@@ -122,24 +126,32 @@ class LocalMpc(MpcSwitching):
 
             # safety constraints - if leader they are done later with parameters
             if not leader:
-                self.constraint(f"safety_{k}", x[0, [k]], "<=", x_c[0, [k]] - d_safe)
+                self.constraint(
+                    f"safety_{k}", x[0, [k]], "<=", x_c[0, [k]] - d_safe + s[:, [k]]
+                )
+        if not leader:
+            self.constraint(
+                f"safety_{N}", x[0, [N]], "<=", x_c[0, [N]] - d_safe + s[:, [N]]
+            )
 
         # objective
         if leader:
             self.leader_traj = []
-            for k in range(N):
+            for k in range(N+1):
                 temp = self.parameter(f"x_ref_{k}", (nx_l, 1))
                 self.leader_traj.append(temp)
                 self.fixed_pars_init[f"x_ref_{k}"] = np.zeros((nx_l, 1))
-                self.constraint(f"safety_{k}", x[0, [k]], "<=", temp[0] - d_safe)
             self.set_local_cost(
                 sum(
-                    (x[:, [k]] - self.leader_traj[k] - sep).T
+                    (x[:, [k]] - self.leader_traj[k]).T
                     @ Q_x_l
-                    @ (x[:, [k]] - self.leader_traj[k] - sep)
+                    @ (x[:, [k]] - self.leader_traj[k])
                     + u[:, [k]].T @ Q_u_l @ u[:, [k]]
                     for k in range(N)
                 )
+                + (x[:, [N]] - self.leader_traj[N]).T
+                @ Q_x_l
+                @ (x[:, [N]] - self.leader_traj[N])
             )
         else:
             # following the agent ahead - therefore the index of the local state copy to track
@@ -150,8 +162,13 @@ class LocalMpc(MpcSwitching):
                     @ Q_x_l
                     @ (x[:, [k]] - x_c[0:nx_l, [k]] - sep)
                     + u[:, [k]].T @ Q_u_l @ u[:, [k]]
+                    + w * s[:, [k]]
                     for k in range(N)
                 )
+                + (x[:, [N]] - x_c[0:nx_l, [N]] - sep).T
+                @ Q_x_l
+                @ (x[:, [N]] - x_c[0:nx_l, [N]] - sep)
+                + w * s[:, [N]]
             )
 
         # solver
@@ -179,7 +196,7 @@ class LocalMpc(MpcSwitching):
 class TrackingGAdmmCoordinator(GAdmmCoordinator):
     def on_timestep_end(self, env, episode: int, timestep: int) -> None:
         # time step starts from 1, so this will set the cost accurately for the next time-step
-        self.set_leader_traj(leader_state[:, timestep : (timestep + N)])
+        self.set_leader_traj(leader_state[:, timestep : (timestep + N + 1)])
         return super().on_timestep_end(env, episode, timestep)
 
     def set_leader_traj(self, leader_traj):
@@ -318,24 +335,31 @@ class TrackingDecentMldCoordinator(DecentMldCoordinator):
 
     def observe_states(self, timestep):
         for i in range(n):
-            predicted_pos = np.zeros((1, N))
-            predicted_vel = np.zeros((1, N))
+            predicted_pos = np.zeros((1, N + 1))
+            predicted_vel = np.zeros((1, N + 1))
             if i == 0:  # lead car
                 predicted_pos[:, [0]] = leader_state[0, [timestep]]
                 predicted_vel[:, [0]] = leader_state[1, [timestep]]
             else:
                 predicted_pos[:, [0]] = env.x[nx_l * (i - 1), :]
                 predicted_vel[:, [0]] = env.x[nx_l * (i - 1) + 1, :]
-            for k in range(N - 1):
+            for k in range(N):
                 predicted_pos[:, [k + 1]] = (
                     predicted_pos[:, [k]] + acc.ts * predicted_vel[:, [k]]
                 )
                 predicted_vel[:, [k + 1]] = predicted_vel[:, [k]]
 
+                self.agents[i].mpc.safety_constraints[k].RHS = (
+                    predicted_pos[0, [k]] - d_safe
+                )
+            self.agents[i].mpc.safety_constraints[N].RHS = (
+                predicted_pos[0, [N]] - d_safe
+            )
+
             if i == 0:
                 x_goal = np.vstack([predicted_pos, predicted_vel])
             else:
-                x_goal = np.vstack([predicted_pos, predicted_vel]) + np.tile(sep, N)
+                x_goal = np.vstack([predicted_pos, predicted_vel]) + np.tile(sep, N + 1)
 
             self.agents[i].set_cost(Q_x_l, Q_u_l, x_goal=x_goal)
 
