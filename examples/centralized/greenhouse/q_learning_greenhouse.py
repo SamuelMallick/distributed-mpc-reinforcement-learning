@@ -307,7 +307,7 @@ days = 40
 ep_len = days * 24 * 4  # 40 days of 15 minute timesteps
 env = MonitorEpisodes(TimeLimit(LettuceGreenHouse(), max_episode_steps=int(ep_len)))
 TD = []
-num_episodes = 300
+num_episodes = 50
 
 if SYM_TYPE == "nom":
     mpc = NominalMpc()
@@ -341,7 +341,7 @@ elif SYM_TYPE == "learn":
                 fixed_parameters=mpc.fixed_pars_init,
                 discount_factor=mpc.discount_factor,
                 update_strategy=ep_len,
-                learning_rate=ExponentialScheduler(1e-4, factor=1),
+                learning_rate=ExponentialScheduler(1e-5, factor=1),
                 hessian_type="approx",
                 record_td_errors=True,
                 exploration=EpsilonGreedyExploration(
@@ -428,7 +428,7 @@ else:
     for key, val in agent.updates_history.items():
         param_dict[key] = val
 
-identifier = "test"
+identifier = "e_5"
 if STORE_DATA:
     with open(
         "data/green"
