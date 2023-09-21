@@ -9,18 +9,14 @@ from gymnasium import Env
 from mpcrl import LstdQLearningAgent
 from mpcrl.agents.agent import ActType, ObsType, SymType
 from mpcrl.agents.lstd_q_learning import ExpType
-from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
+from mpcrl.agents.rl_learning_agent import LrType
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import (
-    EpsilonGreedyExploration,
-    ExplorationStrategy,
-    StepWiseExploration,
-)
+from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
 from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
-from mpcrl.core.schedulers import ExponentialScheduler, Scheduler
+from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
-from mpcrl.wrappers.agents import Log, RecordUpdates
+from mpcrl.wrappers.agents import RecordUpdates
 
 from rldmpc.core.admm import AdmmCoordinator
 from rldmpc.core.consensus import ConsensusCoordinator
