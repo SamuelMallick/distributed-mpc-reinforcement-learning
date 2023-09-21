@@ -18,9 +18,9 @@ from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import RecordUpdates
 
-from rldmpc.core.admm import AdmmCoordinator
-from rldmpc.core.consensus import ConsensusCoordinator
-from rldmpc.mpc.mpc_admm import MpcAdmm
+from dmpcrl.core.admm import AdmmCoordinator
+from dmpcrl.core.consensus import ConsensusCoordinator
+from dmpcrl.mpc.mpc_admm import MpcAdmm
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):

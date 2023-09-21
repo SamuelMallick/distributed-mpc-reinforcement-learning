@@ -5,7 +5,7 @@ import casadi as cs
 # import networkx as netx
 import numpy as np
 
-from rldmpc.utils.discretisation import forward_euler
+from dmpcrl.utils.discretisation import forward_euler
 
 # real parameters of the power system - each is a list containing value for each of the four areas
 

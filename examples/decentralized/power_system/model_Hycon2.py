@@ -6,7 +6,7 @@ import casadi as cs
 # import networkx as netx
 import numpy as np
 
-from rldmpc.utils.discretisation import zero_order_hold
+from dmpcrl.utils.discretisation import zero_order_hold
 
 np.random.seed(1)
 
@@ -307,56 +307,62 @@ def get_learnable_dynamics_local(H, R, D, T_t, T_g, P_tie_list):
     return A_d, B_d, L_d, A_d_c_list
 
 
-# use learned pars
-CENTRALISED = False
 learned_file = "data/power_data/line_40/distributed_con.pkl"
-with open(
-    learned_file,
-    "rb",
-) as file:
-    X = pickle.load(file)
-    U = pickle.load(file)
-    R = pickle.load(file)
-    TD = pickle.load(file)
-    param_list = pickle.load(file)
 
-learned_pars_init = []
-for i in range(n):
-    learned_pars_init.append(
-        {
-            "H": H_list[i],
-            "R": R_list[i],
-            "D": D_list[i],
-            "T_t": T_t_list[i],
-            "T_g": T_g_list[i],
-            "theta_lb": param_list[f"theta_lb_{i}"][-1],
-            "theta_ub": param_list[f"theta_ub_{i}"][-1],
-            "V0": param_list[f"V0_{i}"][-1],
-            "b": param_list[f"b_{i}"][-1],
-            "f_x": param_list[f"f_x_{i}"][-1, :],
-            "f_u": param_list[f"f_u_{i}"][-1, :],
-            "Q_x": param_list[f"Q_x_{i}"][-1, :],
-            "Q_u": param_list[f"Q_u_{i}"][-1, :],
-        }
-    )
 
-learned_P_tie = np.zeros((n, n))  # TODO: make this work also for distributed data
-if CENTRALISED:
+def get_learned_pars_init_list(centralised=False):
+    with open(
+        learned_file,
+        "rb",
+    ) as file:
+        pickle.load(file)
+        pickle.load(file)
+        pickle.load(file)
+        pickle.load(file)
+        param_list = pickle.load(file)
+
+    learned_pars_init = []
     for i in range(n):
-        for j in range(n):
-            if f"P_tie_{i}_{j}" in param_list:
-                learned_P_tie[i, j] = param_list[f"P_tie_{i}_{j}"][-1]
-else:
-    for i in range(n):
-        if f"P_tie_0_{i}" in param_list:
-            learned_P_tie[i, i - 1] = param_list[f"P_tie_0_{i}"][-1]
-        if f"P_tie_1_{i}" in param_list:
-            learned_P_tie[i, i + 1] = param_list[f"P_tie_1_{i}"][-1]
-
-
-def get_learned_pars_init_list():
+        learned_pars_init.append(
+            {
+                "H": H_list[i],
+                "R": R_list[i],
+                "D": D_list[i],
+                "T_t": T_t_list[i],
+                "T_g": T_g_list[i],
+                "theta_lb": param_list[f"theta_lb_{i}"][-1],
+                "theta_ub": param_list[f"theta_ub_{i}"][-1],
+                "V0": param_list[f"V0_{i}"][-1],
+                "b": param_list[f"b_{i}"][-1],
+                "f_x": param_list[f"f_x_{i}"][-1, :],
+                "f_u": param_list[f"f_u_{i}"][-1, :],
+                "Q_x": param_list[f"Q_x_{i}"][-1, :],
+                "Q_u": param_list[f"Q_u_{i}"][-1, :],
+            }
+        )
     return learned_pars_init
 
 
-def get_learned_P_tie_init():
+def get_learned_P_tie_init(centralised=False):
+    with open(
+        learned_file,
+        "rb",
+    ) as file:
+        pickle.load(file)
+        pickle.load(file)
+        pickle.load(file)
+        pickle.load(file)
+        param_list = pickle.load(file)
+    learned_P_tie = np.zeros((n, n))  # TODO: make this work also for distributed data
+    if centralised:
+        for i in range(n):
+            for j in range(n):
+                if f"P_tie_{i}_{j}" in param_list:
+                    learned_P_tie[i, j] = param_list[f"P_tie_{i}_{j}"][-1]
+    else:
+        for i in range(n):
+            if f"P_tie_0_{i}" in param_list:
+                learned_P_tie[i, i - 1] = param_list[f"P_tie_0_{i}"][-1]
+            if f"P_tie_1_{i}" in param_list:
+                learned_P_tie[i, i + 1] = param_list[f"P_tie_1_{i}"][-1]
     return learned_P_tie

@@ -26,15 +26,15 @@ from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 from plot_power import plot_power_system_data
 
-from rldmpc.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
-from rldmpc.core.admm import g_map
-from rldmpc.mpc.mpc_admm import MpcAdmm
+from dmpcrl.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
+from dmpcrl.core.admm import g_map
+from dmpcrl.mpc.mpc_admm import MpcAdmm
 
 np.random.seed(1)
 
 CENTRALISED = False
-LEARN = False
-USE_LEARNED_PARAMS = True
+LEARN = True
+USE_LEARNED_PARAMS = False
 
 STORE_DATA = True
 PLOT = False

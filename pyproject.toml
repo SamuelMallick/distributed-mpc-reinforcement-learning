@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=67.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rldmpc"
-version = "0.0.0"
+name = "dmpcrl"
+version = "1.0.0"
 authors = [
   { name="Samuel Mallick", email="sam.mallick.97@gmail.com" },
 ]
@@ -16,16 +16,28 @@ classifiers = [
     "Programming Language :: Python :: 3.8",
 	"Programming Language :: Python :: 3.9",
 	"Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Mathematics"
 ]
+dependencies = [
+    "csnlp==1.5.6.post1",
+    "mpcrl==1.1.4.post2",
+    "numpy>=1.24.4",
+    "casadi>=3.6.3",
+    "scipy>=1.11.0",
+    "gymnasium>=0.28.1",
+    "matplotlib>=3.7.1"
+]
 
 [project.urls]
-"Homepage" = "https://github.com/FilippoAiraldi/mpc-reinforcement-learning"
-"Bug Tracker" = "https://github.com/FilippoAiraldi/mpc-reinforcement-learning/issues"
+"Homepage" = "https://github.com/SamuelMallick/distributed-mpc-reinforcement-learning"
 
 [tool.setuptools]
 license-files = [
 	"LICENSE",
 ]
+
+[tool.isort]
+profile = "black"

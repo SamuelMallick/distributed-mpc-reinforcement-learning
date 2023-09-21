@@ -22,9 +22,9 @@ from mpcrl.util.control import dlqr
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
 
-from rldmpc.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
-from rldmpc.core.admm import g_map
-from rldmpc.mpc.mpc_admm import MpcAdmm
+from dmpcrl.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
+from dmpcrl.core.admm import g_map
+from dmpcrl.mpc.mpc_admm import MpcAdmm
 
 CENTRALISED = False
 

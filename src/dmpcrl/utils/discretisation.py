@@ -9,7 +9,7 @@ from scipy.signal import cont2discrete
 
 def forward_euler(
     A: np.ndarray, B: np.ndarray, ts: float, c: np.ndarray = None
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Discretise the continuous time system x_dot = Ax + Bu using forward euler method.
     If c also passed uses system x_dot = Ax + Bu + c"""
     Ad = np.eye(A.shape[0]) + ts * A
@@ -47,17 +47,3 @@ def tustin(A: np.ndarray, B: np.ndarray, ts: float) -> Tuple[np.ndarray, np.ndar
     D = np.array([[0]])
     Ad, Bd, Cd, Dd, _ = cont2discrete((A, B, C, D), ts, method="bilinear")
     return Ad, Bd
-
-
-def forward_euler_nl():
-    pass
-
-
-if __name__ == "__main__":
-    A = np.array([[1, 1], [0, 1]])
-    B = np.array([[0], [1]])
-    print(f"Cont: A = {A}, B = {B}")
-    Ad, Bd = forward_euler(A, B, 0.1)
-    print(f"Euler: Ad = {Ad}, Bd = {Bd}")
-    Ad, Bd = zero_order_hold(A, B, 0.1)
-    print(f"ZOH: Ad = {Ad}, Bd = {Bd}")
