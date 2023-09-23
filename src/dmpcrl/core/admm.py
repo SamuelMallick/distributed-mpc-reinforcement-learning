@@ -61,12 +61,12 @@ class AdmmCoordinator:
         # admm related variables
         self.y_list: list[np.ndarray] = []  # dual vars
         self.x_temp_list: list[np.ndarray] = []  # intermediate numerical values for x
-        self.z = np.zeros((self.n * nx_l, N))
+        self.z = np.zeros((self.n * nx_l, N + 1))
 
         for i in range(self.n):
             x_dim = nx_l * len(G[i])  # dimension of augmented state for agent i
-            self.y_list.append(np.zeros((x_dim, N)))
-            self.x_temp_list.append(np.zeros((x_dim, N)))
+            self.y_list.append(np.zeros((x_dim, N + 1)))
+            self.x_temp_list.append(np.zeros((x_dim, N + 1)))
 
         # generate slices of z for each agent, slices that will pull the relevant
         # component of global variable out for the agents
@@ -120,7 +120,7 @@ class AdmmCoordinator:
                 idx = self.G[i].index(i) * self.nx_l
                 self.x_temp_list[i] = cs.vertcat(
                     local_sol_list[i].vals["x_c"][:idx, :],
-                    local_sol_list[i].vals["x"][:, :-1],
+                    local_sol_list[i].vals["x"],
                     local_sol_list[i].vals["x_c"][idx:, :],
                 )
 

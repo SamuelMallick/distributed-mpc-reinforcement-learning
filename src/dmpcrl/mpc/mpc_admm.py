@@ -80,19 +80,19 @@ class MpcAdmm(Mpc[cs.SX]):
 
         x, _ = self.state("x", size)  # local state
         x_c, _, _ = self.variable(
-            "x_c", (size * (num_neighbours), self.N)
+            "x_c", (size * (num_neighbours), self.N + 1)
         )  # neighbor states
 
         # adding them together as the full decision var for augmented cost
         self.x_cat = cs.vertcat(
-            x_c[: (my_index * size), :], x[:, :-1], x_c[(my_index * size) :, :]
+            x_c[: (my_index * size), :], x, x_c[(my_index * size) :, :]
         )
 
         # Parameters in augmented lagrangian
-        self.y = self.parameter("y", (size * (num_neighbours + 1), self.N))
-        self.z = self.parameter("z", (size * (num_neighbours + 1), self.N))
-        self._fixed_pars_init["y"] = np.zeros((size * (num_neighbours + 1), self.N))
-        self._fixed_pars_init["z"] = np.zeros((size * (num_neighbours + 1), self.N))
+        self.y = self.parameter("y", (size * (num_neighbours + 1), self.N + 1))
+        self.z = self.parameter("z", (size * (num_neighbours + 1), self.N + 1))
+        self._fixed_pars_init["y"] = np.zeros((size * (num_neighbours + 1), self.N + 1))
+        self._fixed_pars_init["z"] = np.zeros((size * (num_neighbours + 1), self.N + 1))
 
         return x, x_c
 
@@ -119,10 +119,10 @@ class MpcAdmm(Mpc[cs.SX]):
             local_cost
             + sum(
                 (self.y[:, [k]].T @ (self.x_cat[:, [k]] - self.z[:, [k]]))
-                for k in range(self.N)
+                for k in range(self.N + 1)
             )
             + sum(
                 ((self.rho / 2) * cs.norm_2(self.x_cat[:, [k]] - self.z[:, [k]]) ** 2)
-                for k in range(self.N)
+                for k in range(self.N + 1)
             )
         )
