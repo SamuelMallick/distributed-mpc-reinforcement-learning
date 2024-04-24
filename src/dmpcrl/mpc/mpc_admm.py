@@ -106,7 +106,7 @@ class MpcAdmm(Mpc[cs.SX]):
             "For ADMM based MPC the dynamics must be set manually as constraints due to the coupling."
         )
 
-    def set_local_cost(self, local_cost: cs.SX):
+    def set_local_cost(self, local_cost: cs.SX, rho: float = 0.5):
         """Sets the cost function for the ADMM based MPC. The augmented lagrangian
         terms are augmented to the local cost."""
 
@@ -122,7 +122,7 @@ class MpcAdmm(Mpc[cs.SX]):
                 for k in range(self.N + 1)
             )
             + sum(
-                ((self.rho / 2) * cs.norm_2(self.x_cat[:, [k]] - self.z[:, [k]]) ** 2)
+                ((rho / 2) * cs.norm_2(self.x_cat[:, [k]] - self.z[:, [k]]) ** 2)
                 for k in range(self.N + 1)
             )
         )

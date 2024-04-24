@@ -12,7 +12,7 @@ from mpcrl.agents.lstd_q_learning import ExpType
 from mpcrl.agents.rl_learning_agent import LrType
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
-from mpcrl.core.learning_rate import LearningRate
+# from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
@@ -34,7 +34,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         mpc_cent: Mpc[SymType],
         update_strategy: Union[int, UpdateStrategy],
         discount_factor: float,
-        learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],
+        # learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],    # TODO find out why learning rate cannot import
+        learning_rate,
         learnable_parameters: LearnableParametersDict[SymType],
         n: int,
         mpc_dist_list: list[MpcAdmm],
