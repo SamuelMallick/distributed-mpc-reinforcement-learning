@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmpcrl"
-version = "1.0.1"
+version = "1.0.2"
 authors = [
   { name="Samuel Mallick", email="sam.mallick.97@gmail.com" },
 ]
