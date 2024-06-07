@@ -1,4 +1,4 @@
-from typing import Literal, Optional, TypeVar
+from typing import Literal, TypeVar
 
 import casadi as cs
 import numpy as np
@@ -15,7 +15,7 @@ class MpcAdmm(Mpc[cs.SX]):
         self,
         nlp: Nlp[SymType],
         prediction_horizon: int,
-        control_horizon: Optional[int] = None,
+        control_horizon: int | None = None,
         input_spacing: int = 1,
         shooting: Literal["single", "multi"] = "multi",
     ) -> None:

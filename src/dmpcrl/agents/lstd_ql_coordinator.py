@@ -1,5 +1,6 @@
+from collections.abc import Collection
 from copy import deepcopy
-from typing import Any, Collection, Dict, Literal, Optional, Union
+from typing import Any, Literal
 
 import casadi as cs
 import numpy as np
@@ -9,12 +10,9 @@ from gymnasium import Env
 from mpcrl import LstdQLearningAgent
 from mpcrl.agents.agent import ActType, ObsType, SymType
 from mpcrl.agents.lstd_q_learning import ExpType
-from mpcrl.agents.rl_learning_agent import LrType
 from mpcrl.core.experience import ExperienceReplay
 from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
-# from mpcrl.core.learning_rate import LearningRate
 from mpcrl.core.parameters import LearnableParametersDict
-from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import RecordUpdates
 
@@ -32,7 +30,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
     def __init__(
         self,
         mpc_cent: Mpc[SymType],
-        update_strategy: Union[int, UpdateStrategy],
+        update_strategy: int | UpdateStrategy,
         discount_factor: float,
         # learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],    # TODO find out why learning rate cannot import
         learning_rate,
@@ -44,18 +42,18 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         G: list[list[int]],
         Adj: np.ndarray,
         rho: float,
-        fixed_parameters: Union[
-            None, Dict[str, npt.ArrayLike], Collection[Dict[str, npt.ArrayLike]]
-        ] = None,
-        exploration: Optional[ExplorationStrategy] = None,
-        experience: Optional[ExperienceReplay[ExpType]] = None,
+        fixed_parameters: (
+            None | dict[str, npt.ArrayLike] | Collection[dict[str, npt.ArrayLike]]
+        ) = None,
+        exploration: ExplorationStrategy | None = None,
+        experience: ExperienceReplay[ExpType] | None = None,
         max_percentage_update: float = float("+inf"),
         warmstart: Literal["last", "last-successful"] = "last-successful",
         hessian_type: Literal["approx", "full"] = "approx",
         record_td_errors: bool = False,
         cho_maxiter: int = 1000,
-        cho_solve_kwargs: Optional[Dict[str, Any]] = None,
-        name: Optional[str] = None,
+        cho_solve_kwargs: dict[str, Any] | None = None,
+        name: str | None = None,
         centralised_flag: bool = False,
         centralised_debug: bool = False,
     ) -> None:
@@ -147,7 +145,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         episodes: int,
         seed=None,
         raises: bool = True,
-        env_reset_options: Optional[dict[str, Any]] = None,
+        env_reset_options: dict[str, Any] | None = None,
     ):
         if not self.centralised_flag:
             for agent in self.agents:
@@ -178,7 +176,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         deterministic: bool = True,
         seed=None,
         raises: bool = True,
-        env_reset_options: Optional[Dict[str, Any]] = None,
+        env_reset_options: dict[str, Any] | None = None,
     ):
         if self.centralised_flag:
             return super().evaluate(env, episodes, seed, raises, env_reset_options)

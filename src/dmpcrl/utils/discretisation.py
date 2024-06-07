@@ -1,5 +1,4 @@
 from math import factorial
-from typing import Tuple
 
 import casadi as cs
 import numpy as np
@@ -9,7 +8,7 @@ from scipy.signal import cont2discrete
 
 def forward_euler(
     A: np.ndarray, B: np.ndarray, ts: float, c: np.ndarray = None
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Discretise the continuous time system x_dot = Ax + Bu using forward euler method.
     If c also passed uses system x_dot = Ax + Bu + c"""
     Ad = np.eye(A.shape[0]) + ts * A
@@ -23,7 +22,7 @@ def forward_euler(
 
 def zero_order_hold(
     A: np.ndarray, B: np.ndarray, ts: float, N: int = 30
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Discretise the continuous time system x_dot = Ax + Bu using ZOH"""
     n = A.shape[0]
     I = np.eye(n)
@@ -41,7 +40,7 @@ def zero_order_hold(
     return Ad, Bd
 
 
-def tustin(A: np.ndarray, B: np.ndarray, ts: float) -> Tuple[np.ndarray, np.ndarray]:
+def tustin(A: np.ndarray, B: np.ndarray, ts: float) -> tuple[np.ndarray, np.ndarray]:
     """Discretise the continuous time system x_dot = Ax + Bu using ZOH"""
     C = np.eye(A.shape[0])
     D = np.array([[0]])

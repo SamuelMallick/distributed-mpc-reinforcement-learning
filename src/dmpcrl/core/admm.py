@@ -1,5 +1,3 @@
-from typing import List
-
 import casadi as cs
 import numpy as np
 from mpcrl import Agent
@@ -22,8 +20,8 @@ class AdmmCoordinator:
 
     def __init__(
         self,
-        agents: List[Agent],
-        G: List[List[int]],
+        agents: list[Agent],
+        G: list[list[int]],
         N: int,
         nx_l: int,
         nu_l: int,
