@@ -1,13 +1,14 @@
 from collections.abc import Collection
 from copy import deepcopy
 from typing import Any, Literal
-
+from mpcrl.core.warmstart import WarmStartStrategy
 import casadi as cs
 import numpy as np
 import numpy.typing as npt
 from csnlp.wrappers import Mpc
 from gymnasium import Env
 from mpcrl import LstdQLearningAgent
+from mpcrl.optim.gradient_based_optimizer import GradientBasedOptimizer
 from mpcrl.agents.agent import ActType, ObsType, SymType
 from mpcrl.agents.lstd_q_learning import ExpType
 from mpcrl.core.experience import ExperienceReplay
@@ -16,127 +17,270 @@ from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import RecordUpdates
 
-from dmpcrl.core.admm import AdmmCoordinator
+from dmpcrl.core.admm import AdmmCoordinator, g_map
 from dmpcrl.core.consensus import ConsensusCoordinator
 from dmpcrl.mpc.mpc_admm import MpcAdmm
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Generic,
+    Literal,
+    Optional,
+    SupportsFloat,
+    Union,
+)
+
+import casadi as cs
+import numpy as np
+import numpy.typing as npt
+from csnlp import Solution
+from csnlp.wrappers import Mpc, NlpSensitivity
+from gymnasium import Env
+from scipy.linalg import cho_solve
+from typing_extensions import TypeAlias
+
+from mpcrl.agents.agent import ActType, ObsType, SymType
+from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
+from mpcrl.core.experience import ExperienceReplay
+from mpcrl.core.exploration import ExplorationStrategy
+from mpcrl.core.learning_rate import LearningRate
+from mpcrl.core.parameters import LearnableParametersDict
+from mpcrl.core.schedulers import Scheduler
+from mpcrl.core.update import UpdateStrategy
+from mpcrl.util.math import cholesky_added_multiple_identities
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
-    """Coordinator to handle the communication and learning of a multi-agent q-learning system."""
+    """Coordinator agent to handle the communication and learning of a multi-agent q-learning system.
 
-    admm_iters = 50
-    consensus_iters = 100
+    The agent maintains and organises a group of learning agents, each with their own MPC and learnable parameters.
+    The value functions and policy are evaluated distrubutedly via ADMM and consensus.
+    """
 
     def __init__(
         self,
-        mpc_cent: Mpc[SymType],
+        distributed_mpcs: list[MpcAdmm],
         update_strategy: int | UpdateStrategy,
         discount_factor: float,
-        # learning_rate: Union[LrType, Scheduler[LrType], LearningRate[LrType]],    # TODO find out why learning rate cannot import
-        learning_rate,
-        learnable_parameters: LearnableParametersDict[SymType],
-        n: int,
-        mpc_dist_list: list[MpcAdmm],
-        learnable_dist_parameters_list: list[LearnableParametersDict[SymType]],
-        fixed_dist_parameters_list: list,
-        G: list[list[int]],
+        optimizer: GradientBasedOptimizer,
+        distributed_learnable_parameters: list[LearnableParametersDict[SymType]],
+        N: int,
+        nx: int,
+        nu: int,
         Adj: np.ndarray,
         rho: float,
-        fixed_parameters: (
-            None | dict[str, npt.ArrayLike] | Collection[dict[str, npt.ArrayLike]]
+        admm_iters: int,
+        consensus_iters: int,
+        distributed_fixed_parameters: (
+            None
+            | list[dict[str, npt.ArrayLike]]
+            | list[Collection[dict[str, npt.ArrayLike]]]
         ) = None,
-        exploration: ExplorationStrategy | None = None,
-        experience: ExperienceReplay[ExpType] | None = None,
-        max_percentage_update: float = float("+inf"),
-        warmstart: Literal["last", "last-successful"] = "last-successful",
-        hessian_type: Literal["approx", "full"] = "approx",
+        exploration: Optional[ExplorationStrategy] = None,
+        experience: Union[None, int, ExperienceReplay] = None,
+        warmstart: Union[
+            Literal["last", "last-successful"], WarmStartStrategy
+        ] = "last-successful",
+        hessian_type: Literal["none", "approx", "full"] = "approx",
         record_td_errors: bool = False,
-        cho_maxiter: int = 1000,
-        cho_solve_kwargs: dict[str, Any] | None = None,
-        name: str | None = None,
-        centralised_flag: bool = False,
-        centralised_debug: bool = False,
+        use_last_action_on_fail: bool = False,
+        remove_bounds_on_initial_action: bool = False,
+        name: Optional[str] = None,
+        centralized_mpc: Optional[Mpc] = None,
+        centralized_learnable_parameters: Optional[
+            LearnableParametersDict[SymType]
+        ] = None,
+        centralized_fixed_parameters: Optional[dict[str, npt.ArrayLike]] = None,
+        centralized_flag: bool = False,
+        centralized_debug: bool = False,
     ) -> None:
-        """Instantiates the coordinator. If centralised_flag is true it acts as a LstdQLearningAgent."""
-        # TODO parameter descriptions
-        self.centralised_flag = centralised_flag
-        self.centralised_debug = centralised_debug
-        self.n = n
+        """Initialise the coordinator agent.
 
-        super().__init__(  # use itself as a learning agent for error checking
-            mpc_cent,
+        Parameters
+        ----------
+        distributed_mpcs : list[MpcAdmm]
+            List of MPCs for each agent.
+        update_strategy : UpdateStrategy or int
+            The strategy used to decide which frequency to update the mpc parameters
+            with. If an `int` is passed, then the default strategy that updates every
+            `n` env's steps is used (where `n` is the argument passed); otherwise, an
+            instance of `UpdateStrategy` can be passed to specify these in more details.
+        discount_factor : float
+            In RL, the factor that discounts future rewards in favor of immediate
+            rewards. Usually denoted as `\\gamma`. Should be a number in (0, 1].
+        optimizer : GradientBasedOptimizer
+            A gradient-based optimizer (e.g., `mpcrl.optim.GradientDescent`) to compute
+            the updates of the learnable parameters, based on the current gradient-based
+            RL algorithm.
+        distributed_learnable_parameters : list[LearnableParametersDict[SymType]]
+            A list of dicts containing the learnable parameters of the MPCs, together with
+            their bounds and values. This dict is complementary with `fixed_parameters`,
+            which contains the MPC parameters that are not learnt by the agents.
+        N : int
+            The prediction horizon of the MPCs.
+        nx : int
+            The state dimension of the agents. Assumed to be the same for all.
+        nu : int
+            The control dimension of the agents. Assumed to be the same for all.
+        Adj : np.ndarray
+            Adjacency matrix for the network of agents. Adj[i, j] = 1 if agent j influences
+            agent i, and 0 otherwise.
+        rho : float
+            The penalty parameter for the ADMM algorithm.
+        admm_iters : int
+            The number of iterations to run the ADMM algorithm for.
+        consensus_iters : int
+            The number of iterations to run the consensus algorithm for.
+        distributed_fixed_parameters : None | list[dict[str, npt.ArrayLike]] | list[Collection[dict[str, npt.ArrayLike]]]
+            A list of dicts (or collection of dict, in case of `csnlp.MultistartNlp`) whose keys
+            are the names of the MPC parameters and the values are their corresponding
+            values. Use this to specify fixed parameters, that is, non-learnable. If
+            `None`, then no fixed parameter is assumed.
+        exploration : ExplorationStrategy, optional
+            Exploration strategy for inducing exploration in the online MPC policy. By
+            default `None`, in which case `NoExploration` is used. Should not be set
+            when offpolicy learning, as the exploration should be taken care in the
+            offpolicy data generation.
+        experience : int or ExperienceReplay, optional
+            The container for experience replay memory. If `None` is passed, then a
+            memory with length 1 is created, i.e., it keeps only the latest memory
+            transition.  If an integer `n` is passed, then a memory with the length `n`
+            is created and with sample size `n`.
+            In the case of LSTD Q-learning, each memory item consists of the action
+            value function's gradient and hessian computed at each (succesful) env's
+            step.
+        warmstart: "last" or "last-successful" or WarmStartStrategy, optional
+            The warmstart strategy for the MPC's NLP. If `last-successful`, the last
+            successful solution is used to warm start the solver for the next iteration.
+            If `last`, the last solution is used, regardless of success or failure.
+            Furthermoer, a `WarmStartStrategy` object can be passed to specify a
+            strategy for generating multiple warmstart points for the NLP. This is
+            useful to generate multiple initial conditions for very non-convex problems.
+            Can only be used with an MPC that has an underlying multistart NLP problem
+            (see `csnlp.MultistartNlp`).
+        hessian_type : {'none', 'approx', 'full'}, optional
+            The type of hessian to use in this (potentially) second-order algorithm.
+            If 'none', no second order information is used. If `approx`, an easier
+            approximation of it is used; otherwise, the full hessian is computed but
+            this is much more expensive. This option must be in accordance with the
+            choice of `optimizer`, that is, if the optimizer does not use second order
+            information, then this option must be set to `none`.
+        record_td_errors: bool, optional
+            If `True`, the TD errors are recorded in the field `td_errors`, which
+            otherwise is `None`. By default, does not record them.
+        use_last_action_on_fail : bool, optional
+            In case the MPC solver fails
+             * if `False`, the action from the last solver's iteration is returned
+               anyway (though suboptimal)
+             * if `True`, the action from the last successful call to the MPC is
+               returned instead (if the MPC has been solved at least once successfully).
+
+            By default, `False`.
+        remove_bounds_on_initial_action : bool, optional
+            When `True`, the upper and lower bounds on the initial action are removed in
+            the action-value function approximator Q(s,a) since the first action is
+            constrained to be equal to the initial action. This is useful to avoid
+            issues in the LICQ of the NLP. However, it can lead to numerical problems.
+            By default, `False`.
+        name : str, optional
+            Name of the agent. If `None`, one is automatically created from a counter of
+            the class' instancies.
+        centralized_mpc : Mpc, optional
+            A centralized MPC to be used for the centralized agent, if the centralized learning is
+            conducted in place of distributed learning. By default, `None`.
+        centralized_learnable_parameters : LearnableParametersDict[SymType], optional
+            The learnable parameters of the centralized MPC. By default, `None`.
+        centralized_fixed_parameters : dict[str, npt.ArrayLike], optional
+            The fixed parameters of the centralized MPC. By default, `None`.
+        centralized_flag : bool, optional
+            If `True`, the agent acts as a centralized agent, using the centralized MPC
+            to learn a centralized controller for the whole system. By default, `False`.
+        centralized_debug : bool, optional
+            If true the centralized MPC will be used to check the distributed MPCs at each timestep.
+        """
+        self.n = len(distributed_mpcs)
+        self.centralized_flag = centralized_flag
+        self.centralized_debug = centralized_debug
+
+        # coordinator is itself a learning agent
+        super().__init__(
+            centralized_mpc
+            if centralized_flag
+            else deepcopy(
+                distributed_mpcs[0]
+            ),  # if not centralized, use the first agent's mpc to satisfy the parent class
             update_strategy,
             discount_factor,
-            learning_rate,
-            learnable_parameters,
-            fixed_parameters,
+            optimizer,
+            centralized_learnable_parameters
+            if centralized_flag
+            else deepcopy(
+                distributed_learnable_parameters[0]
+            ),  # if not centralized, use the first agent's learnable params to satisfy the parent class
+            centralized_fixed_parameters
+            if centralized_flag
+            else deepcopy(
+                distributed_fixed_parameters[0]
+            ),  # if not centralized, use the first agent's fixed params to satisfy the parent class
             exploration,
             experience,
-            max_percentage_update,
             warmstart,
             hessian_type,
             record_td_errors,
-            cho_maxiter,
-            cho_solve_kwargs,
+            use_last_action_on_fail,
+            remove_bounds_on_initial_action,
             name,
         )
 
-        if not centralised_flag:  # act as a coordinator of learning agents
-            self._updates_enabled = False  # Turn updates off for the centralised
-            # configure copies of exploration with different rndom generators to avoid all agents exploring identicaly
-            exploration_list = [None] * n
+        if (
+            not centralized_flag
+        ):  # coordinates the distributed learning, rather than doing the learning itself
+            self._updates_enabled = False  # turn off updates for the coordinator
+            exploration_list = [None] * self.n
             if exploration is not None:
-                for i in range(n):
-                    new_exp = deepcopy(exploration)
-                    new_exp.reset(i)  # reseting with new seed
-                    exploration_list[i] = StepWiseExploration(
-                        new_exp, self.admm_iters, stepwise_decay=False
-                    )  # step wise to account for ADMM iters
-            self.agents: list[LstdQLearningAgent] = []
-            for i in range(n):
-                self.agents.append(  # create agents here, passing the mpc, learnable, and fixed params from the lists
-                    RecordUpdates(
-                        LstdQLearningAgent(
-                            mpc_dist_list[i],
-                            deepcopy(update_strategy),
-                            discount_factor,
-                            deepcopy(learning_rate),
-                            learnable_dist_parameters_list[i],
-                            fixed_dist_parameters_list[i],
-                            exploration_list[i],
-                            deepcopy(experience),
-                            max_percentage_update,
-                            warmstart,
-                            hessian_type,
-                            record_td_errors,
-                            cho_maxiter,
-                            cho_solve_kwargs,  # TODO add copy
-                            f"{name}_{i}",
-                        )
+                for i in range(self.n):
+                    new_exp = deepcopy(exploration).reset(
+                        seed=i
+                    )  # copying and reseting with new seed, avoiding identical exploration between agents
+                    exploration_list[
+                        i
+                    ] = StepWiseExploration(  # convert to stepwise exploration such that exploration is not changed within ADMM iterations
+                        new_exp, admm_iters, stepwise_decay=False
+                    )
+            self.agents = [
+                RecordUpdates(
+                    LstdQLearningAgent(
+                        distributed_mpcs[i],
+                        deepcopy(update_strategy),
+                        discount_factor,
+                        deepcopy(optimizer),
+                        distributed_learnable_parameters[i],
+                        distributed_fixed_parameters[i],
+                        exploration_list[i],
+                        deepcopy(experience),
+                        warmstart,
+                        hessian_type,
+                        record_td_errors,
+                        use_last_action_on_fail,
+                        remove_bounds_on_initial_action,
+                        f"{name}_{i}",
                     )
                 )
-
-            # vars for admm procedures
-            self.N = mpc_cent.horizon
-
-            self.nx_l = mpc_dist_list[
-                0
-            ].nx_l  # used to seperate states into each agents
-            self.nu_l = mpc_dist_list[
-                0
-            ].nu_l  # used to seperate control into each agents
-
+                for i in range(self.n)
+            ]
+            # ADMM and consensus coordinator objects
+            G = g_map(Adj)
             self.admm_coordinator = AdmmCoordinator(
                 self.agents,
                 G,
-                N=mpc_cent.horizon,
-                nx_l=self.nx_l,
-                nu_l=self.nu_l,
+                N=N,
+                nx_l=nx,
+                nu_l=nu,
                 rho=rho,
-                iters=self.admm_iters,
+                iters=admm_iters,
             )
-
-            self.consensus_coordinator = ConsensusCoordinator(Adj, self.consensus_iters)
+            self.consensus_coordinator = ConsensusCoordinator(Adj, consensus_iters)
 
     # need to override train method to manually reset all agent MPCs and NOT activate updates for centralised
     def train(
@@ -147,7 +291,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         raises: bool = True,
         env_reset_options: dict[str, Any] | None = None,
     ):
-        if not self.centralised_flag:
+        if not self.centralized_flag:
             for agent in self.agents:
                 agent.reset(seed)
             self._updates_enabled = False
@@ -178,7 +322,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         raises: bool = True,
         env_reset_options: dict[str, Any] | None = None,
     ):
-        if self.centralised_flag:
+        if self.centralized_flag:
             return super().evaluate(env, episodes, seed, raises, env_reset_options)
 
         for agent in self.agents:
@@ -225,7 +369,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         rewards = 0.0
         state = init_state
 
-        if self.centralised_flag:
+        if self.centralized_flag:
             return super().train_one_episode(env, episode, init_state, raises)
         else:
             # solve for the first action
@@ -253,7 +397,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
                 # compare dual vars of centralised and distributed sols
                 # dynamics
-                if self.centralised_debug:
+                if self.centralized_debug:
                     solQ = self.action_value(
                         state, joint_action
                     )  # centralized val from joint action
@@ -299,7 +443,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     agent.on_env_step(env, episode, timestep)
 
                 # compute V(s+) and store transition
-                if self.centralised_debug:
+                if self.centralized_debug:
                     new_action, solV = self.state_value(new_state, False)  # centralised
                     if not self._try_store_experience(cost, solQ, solV):
                         self.on_mpc_failure(
