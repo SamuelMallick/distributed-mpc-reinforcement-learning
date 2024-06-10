@@ -16,6 +16,10 @@ from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.wrappers.agents import RecordUpdates
+from mpcrl.util.seeding import RngType, mk_seed
+from gymnasium.spaces import Box
+from mpcrl.core.exploration import ExplorationStrategy, NoExploration
+from warnings import warn
 
 from dmpcrl.core.admm import AdmmCoordinator, g_map
 from dmpcrl.core.consensus import ConsensusCoordinator
@@ -175,7 +179,6 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                anyway (though suboptimal)
              * if `True`, the action from the last successful call to the MPC is
                returned instead (if the MPC has been solved at least once successfully).
-
             By default, `False`.
         remove_bounds_on_initial_action : bool, optional
             When `True`, the upper and lower bounds on the initial action are removed in
@@ -200,6 +203,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             If true the centralized MPC will be used to check the distributed MPCs at each timestep.
         """
         self.n = len(distributed_mpcs)
+        self.N = N
         self.centralized_flag = centralized_flag
         self.centralized_debug = centralized_debug
 
@@ -236,7 +240,6 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         if (
             not centralized_flag
         ):  # coordinates the distributed learning, rather than doing the learning itself
-            self._updates_enabled = False  # turn off updates for the coordinator
             exploration_list = [None] * self.n
             if exploration is not None:
                 for i in range(self.n):
@@ -282,35 +285,77 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             )
             self.consensus_coordinator = ConsensusCoordinator(Adj, consensus_iters)
 
-    # need to override train method to manually reset all agent MPCs and NOT activate updates for centralised
     def train(
         self,
         env: Env[ObsType, ActType],
         episodes: int,
-        seed=None,
+        seed: RngType = None,  # TODO resolve type hinting
         raises: bool = True,
-        env_reset_options: dict[str, Any] | None = None,
-    ):
+        env_reset_options: Optional[dict[str, Any]] = None,
+    ) -> npt.NDArray[np.floating]:
+        """Train the system on the environment. Overiding the parent class method to handle distributed learning.
+        Calls callback hooks also for distributed agents.
+
+        Parameters
+        ----------
+        env : Env[ObsType, ActType]
+            A gym environment where to train in.
+        episodes : int
+            Number of training episodes.
+        seed : None, int, array_like[ints], SeedSequence, BitGenerator, Generator
+            Agent's and each env's RNG seed.
+        raises : bool, optional
+            If `True`, when any of the MPC solver runs fails, or when an update fails,
+            the corresponding error is raised; otherwise, only a warning is raised.
+        env_reset_options : dict, optional
+            Additional information to specify how the environment is reset at each
+            training episode (optional, depending on the specific environment).
+
+        Returns
+        -------
+        array of doubles
+            The cumulative returns for each training episode.
+
+        Raises
+        ------
+        MpcSolverError or MpcSolverWarning
+            Raises the error or the warning (depending on `raises`) if any of the MPC
+            solvers fail.
+        UpdateError or UpdateWarning
+            Raises the error or the warning (depending on `raises`) if the update fails.
+        """
+        if hasattr(env, "action_space"):
+            assert isinstance(env.action_space, Box), "Env action space must be a Box,"
+        rng = np.random.default_rng(seed)
         if not self.centralized_flag:
             for agent in self.agents:
-                agent.reset(seed)
+                agent.reset(rng)
             self._updates_enabled = False
         else:
             self._updates_enabled = True
+        self.reset(rng)
 
         self._raises = raises
         returns = np.zeros(episodes, float)
-        self.on_training_start(env)
-        seeds = map(int, np.random.SeedSequence(seed).generate_state(episodes))
 
-        for episode, current_seed in zip(range(episodes), seeds):
-            self.reset(current_seed)
-            state, _ = env.reset(seed=current_seed, options=env_reset_options)
-            self.on_episode_start(env, episode)
-            returns[episode] = self.train_one_episode(env, episode, state, raises)
-            self.on_episode_end(env, episode, returns[episode])
+        self.on_training_start(env)
+        for agent in self.agents:
+            agent.on_training_start(env)
+
+        for episode in range(episodes):
+            state, _ = env.reset(seed=mk_seed(rng), options=env_reset_options)
+            self.on_episode_start(env, episode, state)
+            for agent in self.agents:
+                agent.on_episode_start(env, episode, state)
+            r = self.train_one_episode(env, episode, state, raises)
+            self.on_episode_end(env, episode, r)
+            for agent in self.agents:
+                agent.on_episode_end(env, episode, r)
+            returns[episode] = r
 
         self.on_training_end(env, returns)
+        for agent in self.agents:
+            agent.on_training_end(env, returns)
         return returns
 
     def evaluate(
@@ -318,43 +363,89 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         env: Env[ObsType, ActType],
         episodes: int,
         deterministic: bool = True,
-        seed=None,
+        seed: RngType = None,  # TODO resolve type hinting
         raises: bool = True,
-        env_reset_options: dict[str, Any] | None = None,
-    ):
+        env_reset_options: Optional[dict[str, Any]] = None,
+    ) -> npt.NDArray[np.floating]:
+        """Evaluates the agent in a given environment. Overiding the parent class method to handle distributed learning.
+        Calls callback hooks also for distributed agents.
+
+        Note: after solving `V(s)` for the current state `s`, the action is computed and
+        passed to the environment as the concatenation of the first optimal action
+        variables of the MPC (see `csnlp.Mpc.actions`).
+
+        Parameters
+        ----------
+        env : Env[ObsType, ActType]
+            A gym environment where to test the agent in.
+        episodes : int
+            Number of evaluation episodes.
+        deterministic : bool, optional
+            Whether the agent should act deterministically; by default, `True`.
+        seed : None, int, array_like[ints], SeedSequence, BitGenerator, Generator
+            Agent's and each env's RNG seed.
+        raises : bool, optional
+            If `True`, when any of the MPC solver runs fails, or when an update fails,
+            the corresponding error is raised; otherwise, only a warning is raised.
+        env_reset_options : dict, optional
+            Additional information to specify how the environment is reset at each
+            evalution episode (optional, depending on the specific environment).
+
+        Returns
+        -------
+        array of doubles
+            The cumulative returns (one return per evaluation episode).
+
+        Raises
+        ------
+            Raises if the MPC optimization solver fails and `warns_on_exception=False`.
+        """
         if self.centralized_flag:
-            return super().evaluate(env, episodes, seed, raises, env_reset_options)
+            return super().evaluate(
+                env, episodes, deterministic, seed, raises, env_reset_options
+            )
 
+        rng = np.random.default_rng(seed)
+        self.reset(rng)
         for agent in self.agents:
-            agent.reset(seed)
-
+            agent.reset(rng)
         returns = np.zeros(episodes)
         self.on_validation_start(env)
-        seeds = map(int, np.random.SeedSequence(seed).generate_state(episodes))
+        for agent in self.agents:
+            agent.on_validation_start(env)
 
-        for episode, current_seed in zip(range(episodes), seeds):
-            self.reset(current_seed)
-            state, _ = env.reset(seed=current_seed, options=env_reset_options)
+        for episode in range(
+            episodes
+        ):  # TODO ask Filippo why no longer resetting for each ep?
+            state, _ = env.reset(seed=mk_seed(rng), options=env_reset_options)
             truncated, terminated, timestep = False, False, 0
-            self.on_episode_start(env, episode)
+            self.on_episode_start(env, episode, state)
+            for agent in self.agents:
+                agent.on_episode_start(env, episode, state)
 
             while not (truncated or terminated):
-                joint_action, sol_list, error_flag = self.distributed_state_value(
-                    state, episode, raises, deterministic=deterministic
-                )
-                if error_flag:
+                joint_action, sol_list, error_flag = self.distributed_state_value(state)
+                if error_flag:  # TODO do we need this?
                     return returns
 
                 state, r, truncated, terminated, _ = env.step(joint_action)
                 self.on_env_step(env, episode, timestep)
+                for agent in self.agents:
+                    agent.on_env_step(env, episode, timestep)
 
                 returns[episode] += r
                 timestep += 1
                 self.on_timestep_end(env, episode, timestep)
+                for agent in self.agents:
+                    agent.on_timestep_end(env, episode, timestep)
 
             self.on_episode_end(env, episode, returns[episode])
+            for agent in self.agents:
+                agent.on_episode_end(env, episode, returns[episode])
 
         self.on_validation_end(env, returns)
+        for agent in self.agents:
+            agent.on_validation_end(env, returns)
         return returns
 
     def train_one_episode(
@@ -364,159 +455,199 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         init_state: ObsType,
         raises: bool = True,
     ) -> float:
+        if self.centralized_flag:
+            return super().train_one_episode(env, episode, init_state, raises)
+
         truncated = terminated = False
         timestep = 0
         rewards = 0.0
         state = init_state
-
-        if self.centralized_flag:
-            return super().train_one_episode(env, episode, init_state, raises)
-        else:
-            # solve for the first action
+        action_space = getattr(env, "action_space", None)
+        # NOTE: if no exploration is set, then we can get away by solving one MPC per
+        # iteration, instead of two. The reason is that `a=argmin V(s)` and `min Q(s,a)`
+        # are the same thing, because `a` has not been modified by any perturbation.
+        no_exploration = isinstance(
+            self.exploration, NoExploration
+        )  # TODO aask Filippo if this can be checked every iteration, e.g., for eps greedy only resolve Q eps perceentatge of the time
+        # TODO shouldn't we be setting deterministic = True at some point for exploration?
+        # solve for the first action
+        joint_action, solV_list, error_flag = self.distributed_state_value(state)  # TODO check error handling and pass action space
+        if self.centralized_debug:
             action, solV = self.state_value(
-                state, False
+                state, False, action_space=action_space
             )  # get centralised result for comparrison
             if not solV.success:
                 self.on_mpc_failure(episode, None, solV.status, raises)
 
-            joint_action, solV_list, error_flag = self.distributed_state_value(
-                state, episode, raises, deterministic=False
+        while not (truncated or terminated):
+            # compute Q(s,a), or copy V(s) if no exploration is set
+            solQ_list, error_flag = (
+                solV_list,
+                error_flag
+                if no_exploration
+                else self.distributed_action_value(state, joint_action)
+            )
+            if error_flag:  # TODO best way to handle errors?
+                return rewards
+            if self.centralized_debug:
+                solQ = solV if no_exploration else self.action_value(state, action)
+                self.validate_dual_variables(solQ, solQ_list)
+
+            # step the system with action computed at the previous iteration
+            new_state, cost, truncated, terminated, info_dict = env.step(joint_action)
+            dist_costs = info_dict.get(
+                "r_dist", None
+            )  # get distributed costs if returned by env
+
+            self.on_env_step(env, episode, timestep)
+            for agent in self.agents:
+                agent.on_env_step(env, episode, timestep)
+
+            # compute V(s+) and store transition
+            new_joint_action, solV_list, error_flag = self.distributed_state_value(new_state)
+            if error_flag:  # TODO best way to handle errors?
+                return rewards
+            if self.centralized_debug:
+                _, solV = self.state_value(
+                    new_state, False, action_space=action_space
+                )
+                if not self._try_store_experience(cost, solQ, solV):
+                    self.on_mpc_failure(
+                        episode, timestep, f"{solQ.status}/{solV.status}", raises
+                    )
+
+            # consensus on distributed values
+            V_f_vec = np.asarray([sol.f for sol in solV_list])
+            Q_f_vec = np.asarray([sol.f for sol in solQ_list])
+            V_f_con = self.consensus_coordinator.average_consensus(V_f_vec)
+            Q_f_con = self.consensus_coordinator.average_consensus(Q_f_vec)
+            if not np.allclose(V_f_con, V_f_con[0], tolerance=1e-04) or not np.allclose(
+                Q_f_con, Q_f_con[0], tolerance=1e-04
+            ):
+                warn(
+                    "Consensus on value functions innacurate. Max difference in V: {np.max(np.abs(V_f_con - V_f_con[0]))}, Max difference in Q: {np.max(np.abs(Q_f_con - Q_f_con[0]))}"
+                )
+
+            if dist_costs is None:  # agents get direct access to centralized cost
+                cost_con = [cost] * self.n
+            else:  # agents use consensus to get the centralized cost from local costs
+                cost_con = self.consensus_coordinator.average_consensus(
+                    np.asarray(dist_costs)
+                )
+                if not np.allclose(cost_con, cost_con[0], tolerance=1e-04):
+                    warn(
+                        f"Consensus on costs innacurate. Max difference: {np.max(np.abs(cost_con - cost_con[0]))}"
+                    )
+
+            for i in range(self.n):  # store local experiences
+                object.__setattr__(solV_list[i], "f", V_f_con[i])
+                object.__setattr__(solQ_list[i], "f", Q_f_con[i])
+
+                if not self.agents[i].unwrapped._try_store_experience(
+                    cost_con[i], solQ_list[i], solV_list[i]
+                ):
+                    self.agents[i].on_mpc_failure(
+                        episode,
+                        timestep,
+                        f"{solQ_list[i].status}/{solV_list[i].status}",
+                        raises,
+                    )
+            # increase counters
+            state = new_state
+            joint_action = new_joint_action
+            rewards += float(cost)
+            timestep += 1
+
+            self.on_timestep_end(env, episode, timestep)
+            for agent in self.agents:
+                agent.on_timestep_end(env, episode, timestep)
+        return rewards
+
+    def validate_dual_variables(
+        self,
+        centralized_sol: Solution,
+        distributed_sols: list[Solution],
+        constraint_type: Literal["dynamics"] = "dynamics",
+    ) -> None:
+        """Compares the dual variables of centralised and distributed solutions.
+
+        Parameters
+        ----------
+        centralized_sol : Solution
+            The centralised solution.
+        distributed_sols : list[Solution]
+            The distributed solutions.
+        constraint_type : {'dynamics'}, optional
+            The type of constraint to validate the dual variables for. By default,
+            'dynamics'.
+
+        """
+        if constraint_type == "dynamics":
+            cent_duals = centralized_sol.dual_vals["lam_g_dyn"]
+            dist_duals = [
+                np.hstack(
+                    [
+                        distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"]
+                        for k in range(self.N)
+                    ]
+                )
+                for i in range(self.n)
+            ]
+            cent_duals_list: list = []
+            for i in range(self.n):
+                cent_duals_list.append(np.zeros((self.nx_l, self.N)))
+                for k in range(self.N):  # TODO get rid of loop, make it way nicer
+                    # dist_duals_list_dyn[i][:, [k]] = np.array(
+                    #     solQ_list[i].dual_vals[f"lam_g_dynam_{k}"]
+                    # )
+                    cent_duals_list[i][:, [k]] = np.array(
+                        cent_duals[
+                            (self.nx_l * len(self.agents) * k + self.nx_l * i) : (
+                                self.nx_l * len(self.agents) * k + self.nx_l * (i + 1)
+                            )
+                        ]
+                    )
+            dynam_duals_error = np.linalg.norm(
+                cent_duals_list[0]
+                - dist_duals[0]  # TODO make it summed accross all agents not just 1
+            )
+            if dynam_duals_error > 1e-04:
+                warn(
+                    "Dual variables for dynamics constraints do not match between centralised and distributed solutions."
+                )
+        else:
+            raise ValueError(
+                f"Constraint type {constraint_type} not supported for dual variable validation."
             )
 
-            iter_count = 0
-            while not (truncated or terminated):
-                iter_count += 1
-                print(iter_count)
-                # compute Q(s,a)
-                solQ_list, error_flag = self.distributed_action_value(
-                    state, joint_action, episode, raises
-                )
-                if error_flag:
-                    # self.on_training_end(env, rewards)
-                    return rewards
+    def distributed_state_value(self, state):
+        """Computes the distributed state value function using ADMM.
 
-                # compare dual vars of centralised and distributed sols
-                # dynamics
-                if self.centralized_debug:
-                    solQ = self.action_value(
-                        state, joint_action
-                    )  # centralized val from joint action
-                    cent_duals_dyn = solQ.dual_vals["lam_g_dyn"]
-                    dist_duals_list_dyn: list = []
-                    cent_duals_list_dyn: list = []
-                    for i in range(len(self.agents)):
-                        dist_duals_list_dyn.append(np.zeros((self.nx_l, self.N)))
-                        cent_duals_list_dyn.append(np.zeros((self.nx_l, self.N)))
-                        for k in range(self.N):  # TODO get rid of hard coded horizon
-                            dist_duals_list_dyn[i][:, [k]] = np.array(
-                                solQ_list[i].dual_vals[f"lam_g_dynam_{k}"]
-                            )
-                            cent_duals_list_dyn[i][:, [k]] = np.array(
-                                cent_duals_dyn[
-                                    (
-                                        self.nx_l * len(self.agents) * k + self.nx_l * i
-                                    ) : (
-                                        self.nx_l * len(self.agents) * k
-                                        + self.nx_l * (i + 1)
-                                    )
-                                ]
-                            )
-                    dynam_duals_error = np.linalg.norm(
-                        cent_duals_list_dyn[0] - dist_duals_list_dyn[0]
-                    )
-                    if dynam_duals_error > 1e-04:
-                        # exit('Duals of dynamics werent accurate!')
-                        print("Duals of dynamics werent accurate!")
-                # step the system with action computed at the previous iteration
-                new_state, cost, truncated, terminated, info_dict = env.step(
-                    joint_action
-                )
-                if (
-                    "r_dist" in info_dict.keys()
-                ):  # get distributed costs from env dict if its there
-                    dist_costs = info_dict["r_dist"]
-                else:
-                    dist_costs = None
-
-                self.on_env_step(env, episode, timestep)  # step centralised
-                for agent in self.agents:  # step distributed agents
-                    agent.on_env_step(env, episode, timestep)
-
-                # compute V(s+) and store transition
-                if self.centralized_debug:
-                    new_action, solV = self.state_value(new_state, False)  # centralised
-                    if not self._try_store_experience(cost, solQ, solV):
-                        self.on_mpc_failure(
-                            episode, timestep, f"{solQ.status}/{solV.status}", raises
-                        )
-
-                new_joint_action, solV_list, error_flag = self.distributed_state_value(
-                    new_state, episode, raises, deterministic=False
-                )  # distributed
-                if error_flag:
-                    return rewards
-
-                # calculate centralised costs from locals with consensus
-                # V_f = sum((solV_list[i].f) for i in range(len(self.agents)))
-                # Q_f = sum((solQ_list[i].f) for i in range(len(self.agents)))
-                V_f_vec = np.array([solV_list[i].f for i in range(len(self.agents))])
-                Q_f_vec = np.array([solQ_list[i].f for i in range(len(self.agents))])
-                V_f = self.consensus_coordinator.average_consensus(V_f_vec)[0] * len(
-                    self.agents
-                )
-                Q_f = self.consensus_coordinator.average_consensus(Q_f_vec)[0] * len(
-                    self.agents
-                )
-                if dist_costs is not None:
-                    av_cost = self.consensus_coordinator.average_consensus(
-                        np.asarray(dist_costs)
-                    )
-                    cost_f = av_cost[0] * len(self.agents)
-                else:
-                    cost_f = cost
-                for i in range(len(self.agents)):  # store experience for agents
-                    object.__setattr__(
-                        solV_list[i], "f", V_f
-                    )  # overwrite the local costs with the global ones TODO make this nicer
-                    object.__setattr__(solQ_list[i], "f", Q_f)
-
-                    if not self.agents[i].unwrapped._try_store_experience(
-                        cost_f, solQ_list[i], solV_list[i]
-                    ):
-                        self.agents[i].on_mpc_failure(
-                            episode,
-                            timestep,
-                            f"{solQ_list[i].status}/{solV_list[i].status}",
-                            raises,
-                        )
-                # increase counters
-                state = new_state
-                joint_action = new_joint_action
-                rewards += float(cost)
-                timestep += 1
-
-                self.on_timestep_end(env, episode, timestep)
-                for agent in self.agents:
-                    agent.on_timestep_end(env, episode, timestep)
-            return rewards
-
-    def distributed_state_value(self, state, episode, raises, deterministic):
-        # local_action_list, local_sol_list, error_flag = self.admm(
-        #    state, episode, raises, deterministic=deterministic
-        # )
+        Parameters
+        ----------
+        state : cs.DM
+            The centralized state for which to compute the value function."""
         (
             local_action_list,
             local_sol_list,
             error_flag,
-        ) = self.admm_coordinator.solve_admm(state, deterministic=deterministic)
+        ) = self.admm_coordinator.solve_admm(state, deterministic=False)
         if not error_flag:
             return cs.DM(local_action_list), local_sol_list, error_flag
         else:
             return None, local_sol_list, error_flag
 
-    def distributed_action_value(self, state, action, episode, raises):
+    def distributed_action_value(self, state, action):
+        """Computes the distributed action value function using ADMM.
+
+        Parameters
+        ----------
+        state : cs.DM
+            The centralized state for which to compute the value function.
+        action : cs.DM
+            The centralized action for which to compute the value function."""
         (
-            local_action_list,
+            _,
             local_sol_list,
             error_flag,
         ) = self.admm_coordinator.solve_admm(state, action=action)
