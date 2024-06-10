@@ -1,41 +1,55 @@
 import casadi as cs
+from csnlp import Solution
 import numpy as np
 from mpcrl import Agent
-
-
-def g_map(Adj: np.ndarray):
-    """Construct the mapping from local to global variables from an adjacency matrix."""
-    n = Adj.shape[0]  # number of agents
-    G: list[list[int]] = []
-    for i in range(n):
-        G.append([])
-        for j in range(n):
-            if Adj[i, j] == 1 or i == j:
-                G[i].append(j)
-    return G
+from dmpcrl.mpc.mpc_admm import MpcAdmm
 
 
 class AdmmCoordinator:
     """Class for coordinating the ADMM procedure of a network of agents"""
 
+    @staticmethod
+    def g_map(Adj: np.ndarray) -> list[list[int]]:
+        """Construct the mapping from local to global variables from an adjacency matrix.
+        The mapping reads G[i][j] = g, where g is the global index of the j-th local copy for agent i.
+
+        Parameters
+        ----------
+        Adj: np.ndarray
+            Adjacency matrix of the network.
+
+        Returns
+        -------
+        list[list[int]]
+            Mapping from local to global variables.
+        """
+        n = Adj.shape[0]
+        G: list[list[int]] = []
+        for i in range(n):
+            G.append([])
+            for j in range(n):
+                if Adj[i, j] == 1 or i == j:
+                    G[i].append(j)
+        return G
+
     def __init__(
         self,
         agents: list[Agent],
-        G: list[list[int]],
+        Adj: np.ndarray,
         N: int,
         nx_l: int,
         nu_l: int,
         rho: float,
         iters: int = 50,
     ) -> None:
-        """Initiale the ADMM coordinator
+        """Initialise the ADMM coordinator.
 
         Parameters
         ----------
         agents: List[Agent]
             A list of the agents involved in the ADMM procedure.
-        G: List[List[int]]
-            Mapping between local and global indexes: G[i][j] = g
+        Adj: np.ndarray
+            Adjacency matrix of the network.
         N: int
             Length of prediction horizon.
         nx_l: int
@@ -46,46 +60,63 @@ class AdmmCoordinator:
             Constant penalty term for augmented lagrangian.
         iters: int = 50
             Fixed number of ADMM iterations."""
+        if not all(isinstance(agent.V, MpcAdmm) for agent in agents):
+            raise ValueError(
+                f"All agents must have ADMM-based MPCs. Received: {[type(agent.V) for agent in agents]}"
+            )
         self.agents = agents
         self.n = len(agents)
         self.iters = iters
-        self.G = G
+        self.G = self.g_map(Adj)
         self.nx_l = nx_l
         self.nu_l = nu_l
         self.rho = rho
 
-        # TODO confirm that agents have ADMM based MPCs
+        # create auxillary vars for ADMM procedure
+        self.y = np.zeros((self.n, nx_l, N + 1))
+        # self.y_list: list[np.ndarray] = []  # dual vars
+        # self.x_temp: list[np.ndarray] = []  # intermediate numerical values for x
+        self.z = np.zeros((self.n, nx_l, N + 1))
 
-        # admm related variables
-        self.y_list: list[np.ndarray] = []  # dual vars
-        self.x_temp_list: list[np.ndarray] = []  # intermediate numerical values for x
-        self.z = np.zeros((self.n * nx_l, N + 1))
+        # for i in range(self.n):
+        #     x_dim = nx_l * len(G[i])  # dimension of augmented state for agent i
+        #     # self.y_list.append(np.zeros((x_dim, N + 1)))
+        #     # self.x_temp_list.append(np.zeros((x_dim, N + 1)))
 
-        for i in range(self.n):
-            x_dim = nx_l * len(G[i])  # dimension of augmented state for agent i
-            self.y_list.append(np.zeros((x_dim, N + 1)))
-            self.x_temp_list.append(np.zeros((x_dim, N + 1)))
+        # # generate slices of z for each agent, slices that will pull the relevant
+        # # component of global variable out for the agents
+        # z_slices: list[list[int]] = []
+        # for i in range(self.n):
+        #     z_slices.append([])
+        #     for j in self.G[i]:
+        #         z_slices[i] += list(np.arange(nx_l * j, nx_l * (j + 1)))
+        # self.z_slices = z_slices
 
-        # generate slices of z for each agent, slices that will pull the relevant
-        # component of global variable out for the agents
-        z_slices: list[list[int]] = []
-        for i in range(self.n):
-            z_slices.append([])
-            for j in self.G[i]:
-                z_slices[i] += list(np.arange(nx_l * j, nx_l * (j + 1)))
-        self.z_slices = z_slices
-
-    def solve_admm(self, state, action=None, deterministic=False):
+    # TODO check if numpy arrays or DM's passed, also check return types
+    def solve_admm(
+        self, state: np.ndarray, action: np.ndarray | None = None
+    ) -> tuple[list[np.ndarray], list[Solution], bool]:
         """Solve the mpc problem for the network of agents using ADMM. If an
-        action provided, the first action is constrained. Deterministic is used for
-        adding exploration into the local problems."""
+        action provided, the first action is constrained to be the provided action.
+
+        Parameters
+        ----------
+        state: np.ndarray
+            Global state of the network.
+        action: np.ndarray | None = None
+            Global action of the network. If None, the action is solved for.
+
+        Returns
+        -------
+        tuple[list[np.ndarray], list[Solution], bool]
+            A tuple containing the local actions, local solutions and a flag for error.
+        """
 
         loc_action_list = [None] * len(self.agents)
         local_sol_list = [None] * len(self.agents)
 
-        for iter in range(self.iters):
+        for _ in range(self.iters):
             # x update: solve local minimisations
-
             for i in range(len(self.agents)):
                 loc_state = state[
                     self.nx_l * i : self.nx_l * (i + 1), :
