@@ -2,7 +2,7 @@ import casadi as cs
 import numpy as np
 from scipy.linalg import block_diag
 
-np.random.seed(0)
+np.random.seed(0)  # TODO get rid of global seeding
 
 n = 3  # number of agents
 nx_l = 2  # local state dimension

@@ -4,8 +4,7 @@ import pickle
 
 import casadi as cs
 import matplotlib.pyplot as plt
-
-# import networkx as netx
+from mpcrl import ExperienceReplay, UpdateStrategy, optim
 import numpy as np
 from csnlp.wrappers import Mpc
 from env import LtiSystem
@@ -18,14 +17,13 @@ from mpcrl.core.exploration import EpsilonGreedyExploration
 from mpcrl.core.schedulers import ExponentialScheduler
 from mpcrl.wrappers.agents import Log, RecordUpdates
 from mpcrl.wrappers.envs import MonitorEpisodes
-
+from dmpcrl.core.admm import AdmmCoordinator
 from dmpcrl.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
-from dmpcrl.core.admm import g_map
 
 CENTRALISED = False
 
 Adj = get_adj()
-G = g_map(Adj)  # mapping from global var to local var indexes for ADMM
+G = AdmmCoordinator.g_map(Adj)  # mapping from global var to local var indexes for ADMM
 rho = 0.5
 n, nx_l, nu_l = get_model_details()
 _, u_bnd, _ = get_bounds()
@@ -65,34 +63,39 @@ env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e0)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
-            rho=rho,
-            n=n,
-            G=G,
-            Adj=Adj,
-            centralised_flag=CENTRALISED,
-            centralised_debug=True,
-            mpc_cent=mpc,
-            learnable_parameters=learnable_pars,
-            mpc_dist_list=mpc_dist_list,
-            learnable_dist_parameters_list=learnable_dist_parameters_list,
-            fixed_dist_parameters_list=fixed_dist_parameters_list,
-            discount_factor=mpc.discount_factor,
+            distributed_mpcs=mpc_dist_list,
             update_strategy=2,
-            learning_rate=ExponentialScheduler(6e-5, factor=0.9996),
-            hessian_type="none",
-            record_td_errors=True,
-            exploration=EpsilonGreedyExploration(  # None,
+            discount_factor=mpc.discount_factor,
+            optimizer=optim.GradientDescent(
+                learning_rate=ExponentialScheduler(6e-5, factor=0.9996)
+            ),
+            distributed_learnable_parameters=learnable_dist_parameters_list,
+            N=LocalMpc.horizon,
+            nx=2,  # remove hard coding
+            nu=1,
+            Adj=Adj,
+            rho=rho,
+            admm_iters=50,
+            consensus_iters=100,
+            distributed_fixed_parameters=fixed_dist_parameters_list,
+            exploration=EpsilonGreedyExploration(
                 epsilon=ExponentialScheduler(0.7, factor=0.99),
                 strength=0.5 * (u_bnd[1, 0] - u_bnd[0, 0]),
                 seed=1,
             ),
-            experience=ExperienceReplay(  # None,
+            experience=ExperienceReplay(
                 maxlen=100, sample_size=15, include_latest=10, seed=1
-            ),  # None,
+            ),
+            hessian_type="none",
+            record_td_errors=True,
+            centralized_mpc=mpc,
+            centralized_learnable_parameters=learnable_pars,
+            centralized_flag=False,
+            centralized_debug=False,
         )
     ),
     level=logging.DEBUG,
-    log_frequencies={"on_timestep_end": 200},
+    log_frequencies={"on_timestep_end": 1},
 )
 
 agent.train(env=env, episodes=1, seed=1)

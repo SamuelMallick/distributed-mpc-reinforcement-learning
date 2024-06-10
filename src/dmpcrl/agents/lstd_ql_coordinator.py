@@ -1,58 +1,32 @@
 from collections.abc import Collection
 from copy import deepcopy
 from typing import Any, Literal
-from mpcrl.core.warmstart import WarmStartStrategy
-import casadi as cs
-import numpy as np
-import numpy.typing as npt
-from csnlp.wrappers import Mpc
-from gymnasium import Env
-from mpcrl import LstdQLearningAgent
-from mpcrl.optim.gradient_based_optimizer import GradientBasedOptimizer
-from mpcrl.agents.agent import ActType, ObsType, SymType
-from mpcrl.agents.lstd_q_learning import ExpType
-from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
-from mpcrl.core.parameters import LearnableParametersDict
-from mpcrl.core.update import UpdateStrategy
-from mpcrl.wrappers.agents import RecordUpdates
-from mpcrl.util.seeding import RngType, mk_seed
-from gymnasium.spaces import Box
-from mpcrl.core.exploration import ExplorationStrategy, NoExploration
 from warnings import warn
-
-from dmpcrl.core.admm import AdmmCoordinator, g_map
-from dmpcrl.core.consensus import ConsensusCoordinator
-from dmpcrl.mpc.mpc_admm import MpcAdmm
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Generic,
-    Literal,
-    Optional,
-    SupportsFloat,
-    Union,
-)
 
 import casadi as cs
 import numpy as np
 import numpy.typing as npt
 from csnlp import Solution
-from csnlp.wrappers import Mpc, NlpSensitivity
+from csnlp.wrappers import Mpc
 from gymnasium import Env
-from scipy.linalg import cho_solve
-from typing_extensions import TypeAlias
-
-from mpcrl.agents.agent import ActType, ObsType, SymType
-from mpcrl.agents.rl_learning_agent import LrType, RlLearningAgent
+from gymnasium.spaces import Box
+from mpcrl import LstdQLearningAgent
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import ExplorationStrategy
-from mpcrl.core.learning_rate import LearningRate
+from mpcrl.core.exploration import (
+    ExplorationStrategy,
+    NoExploration,
+    StepWiseExploration,
+)
 from mpcrl.core.parameters import LearnableParametersDict
-from mpcrl.core.schedulers import Scheduler
 from mpcrl.core.update import UpdateStrategy
-from mpcrl.util.math import cholesky_added_multiple_identities
+from mpcrl.core.warmstart import WarmStartStrategy
+from mpcrl.optim.gradient_based_optimizer import GradientBasedOptimizer
+from mpcrl.util.seeding import RngType, mk_seed
+from mpcrl.wrappers.agents import RecordUpdates
+
+from dmpcrl.core.admm import AdmmCoordinator
+from dmpcrl.core.consensus import ConsensusCoordinator
+from dmpcrl.mpc.mpc_admm import MpcAdmm
 
 
 class LstdQLearningAgentCoordinator(LstdQLearningAgent):
@@ -68,7 +42,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         update_strategy: int | UpdateStrategy,
         discount_factor: float,
         optimizer: GradientBasedOptimizer,
-        distributed_learnable_parameters: list[LearnableParametersDict[SymType]],
+        distributed_learnable_parameters: list[LearnableParametersDict],
         N: int,
         nx: int,
         nu: int,
@@ -81,21 +55,19 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             | list[dict[str, npt.ArrayLike]]
             | list[Collection[dict[str, npt.ArrayLike]]]
         ) = None,
-        exploration: Optional[ExplorationStrategy] = None,
-        experience: Union[None, int, ExperienceReplay] = None,
-        warmstart: Union[
-            Literal["last", "last-successful"], WarmStartStrategy
-        ] = "last-successful",
+        exploration: ExplorationStrategy | None = None,
+        experience: None | int | ExperienceReplay = None,
+        warmstart: (
+            Literal["last", "last-successful"] | WarmStartStrategy
+        ) = "last-successful",
         hessian_type: Literal["none", "approx", "full"] = "approx",
         record_td_errors: bool = False,
         use_last_action_on_fail: bool = False,
         remove_bounds_on_initial_action: bool = False,
-        name: Optional[str] = None,
-        centralized_mpc: Optional[Mpc] = None,
-        centralized_learnable_parameters: Optional[
-            LearnableParametersDict[SymType]
-        ] = None,
-        centralized_fixed_parameters: Optional[dict[str, npt.ArrayLike]] = None,
+        name: str | None = None,
+        centralized_mpc: Mpc | None = None,
+        centralized_learnable_parameters: None | (LearnableParametersDict) = None,
+        centralized_fixed_parameters: dict[str, npt.ArrayLike] | None = None,
         centralized_flag: bool = False,
         centralized_debug: bool = False,
     ) -> None:
@@ -202,6 +174,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         centralized_debug : bool, optional
             If true the centralized MPC will be used to check the distributed MPCs at each timestep.
         """
+        if hessian_type != "none":
+            raise ValueError(
+                "Distributed learning does not support second order information."
+            )
         self.n = len(distributed_mpcs)
         self.N = N
         self.centralized_flag = centralized_flag
@@ -209,23 +185,21 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
         # coordinator is itself a learning agent
         super().__init__(
-            centralized_mpc
-            if centralized_flag
-            else deepcopy(
-                distributed_mpcs[0]
+            (
+                centralized_mpc if centralized_flag else deepcopy(distributed_mpcs[0])
             ),  # if not centralized, use the first agent's mpc to satisfy the parent class
             update_strategy,
             discount_factor,
             optimizer,
-            centralized_learnable_parameters
-            if centralized_flag
-            else deepcopy(
-                distributed_learnable_parameters[0]
+            (
+                centralized_learnable_parameters
+                if centralized_flag
+                else deepcopy(distributed_learnable_parameters[0])
             ),  # if not centralized, use the first agent's learnable params to satisfy the parent class
-            centralized_fixed_parameters
-            if centralized_flag
-            else deepcopy(
-                distributed_fixed_parameters[0]
+            (
+                centralized_fixed_parameters
+                if centralized_flag
+                else deepcopy(distributed_fixed_parameters[0])
             ),  # if not centralized, use the first agent's fixed params to satisfy the parent class
             exploration,
             experience,
@@ -246,10 +220,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                     new_exp = deepcopy(exploration).reset(
                         seed=i
                     )  # copying and reseting with new seed, avoiding identical exploration between agents
-                    exploration_list[
-                        i
-                    ] = StepWiseExploration(  # convert to stepwise exploration such that exploration is not changed within ADMM iterations
-                        new_exp, admm_iters, stepwise_decay=False
+                    exploration_list[i] = (
+                        StepWiseExploration(  # convert to stepwise exploration such that exploration is not changed within ADMM iterations
+                            new_exp, admm_iters, stepwise_decay=False
+                        )
                     )
             self.agents = [
                 RecordUpdates(
@@ -273,10 +247,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 for i in range(self.n)
             ]
             # ADMM and consensus coordinator objects
-            G = g_map(Adj)
             self.admm_coordinator = AdmmCoordinator(
                 self.agents,
-                G,
+                Adj,
                 N=N,
                 nx_l=nx,
                 nu_l=nu,
@@ -287,11 +260,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
     def train(
         self,
-        env: Env[ObsType, ActType],
+        env: Env,
         episodes: int,
         seed: RngType = None,  # TODO resolve type hinting
         raises: bool = True,
-        env_reset_options: Optional[dict[str, Any]] = None,
+        env_reset_options: dict[str, Any] | None = None,
     ) -> npt.NDArray[np.floating]:
         """Train the system on the environment. Overiding the parent class method to handle distributed learning.
         Calls callback hooks also for distributed agents.
@@ -360,12 +333,12 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
     def evaluate(
         self,
-        env: Env[ObsType, ActType],
+        env: Env,
         episodes: int,
         deterministic: bool = True,
         seed: RngType = None,  # TODO resolve type hinting
         raises: bool = True,
-        env_reset_options: Optional[dict[str, Any]] = None,
+        env_reset_options: dict[str, Any] | None = None,
     ) -> npt.NDArray[np.floating]:
         """Evaluates the agent in a given environment. Overiding the parent class method to handle distributed learning.
         Calls callback hooks also for distributed agents.
@@ -376,7 +349,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
         Parameters
         ----------
-        env : Env[ObsType, ActType]
+        env : Env
             A gym environment where to test the agent in.
         episodes : int
             Number of evaluation episodes.
@@ -450,9 +423,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
     def train_one_episode(
         self,
-        env: Env[ObsType, ActType],
+        env: Env,
         episode: int,
-        init_state: ObsType,
+        init_state: np.ndarray,
         raises: bool = True,
     ) -> float:
         if self.centralized_flag:
@@ -471,7 +444,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         )  # TODO aask Filippo if this can be checked every iteration, e.g., for eps greedy only resolve Q eps perceentatge of the time
         # TODO shouldn't we be setting deterministic = True at some point for exploration?
         # solve for the first action
-        joint_action, solV_list, error_flag = self.distributed_state_value(state)  # TODO check error handling and pass action space
+        joint_action, solV_list, error_flag = self.distributed_state_value(
+            state
+        )  # TODO check error handling and pass action space
         if self.centralized_debug:
             action, solV = self.state_value(
                 state, False, action_space=action_space
@@ -483,9 +458,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             # compute Q(s,a), or copy V(s) if no exploration is set
             solQ_list, error_flag = (
                 solV_list,
-                error_flag
-                if no_exploration
-                else self.distributed_action_value(state, joint_action)
+                (
+                    error_flag
+                    if no_exploration
+                    else self.distributed_action_value(state, joint_action)
+                ),
             )
             if error_flag:  # TODO best way to handle errors?
                 return rewards
@@ -504,13 +481,13 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 agent.on_env_step(env, episode, timestep)
 
             # compute V(s+) and store transition
-            new_joint_action, solV_list, error_flag = self.distributed_state_value(new_state)
+            new_joint_action, solV_list, error_flag = self.distributed_state_value(
+                new_state
+            )
             if error_flag:  # TODO best way to handle errors?
                 return rewards
             if self.centralized_debug:
-                _, solV = self.state_value(
-                    new_state, False, action_space=action_space
-                )
+                _, solV = self.state_value(new_state, False, action_space=action_space)
                 if not self._try_store_experience(cost, solQ, solV):
                     self.on_mpc_failure(
                         episode, timestep, f"{solQ.status}/{solV.status}", raises
@@ -631,7 +608,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             local_action_list,
             local_sol_list,
             error_flag,
-        ) = self.admm_coordinator.solve_admm(state, deterministic=False)
+        ) = self.admm_coordinator.solve_admm(state)
         if not error_flag:
             return cs.DM(local_action_list), local_sol_list, error_flag
         else:

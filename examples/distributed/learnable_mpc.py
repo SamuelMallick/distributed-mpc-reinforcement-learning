@@ -40,17 +40,17 @@ class CentralizedMpc(Mpc[cs.SX]):
     # add the parameters corresponding to each agent
     for i in range(n):
         for name, val in learnable_pars_init_single.items():
-            learnable_pars_init[
-                f"{name}_{i}"
-            ] = val  # add the '_i' to indicate parameter for agent i
+            learnable_pars_init[f"{name}_{i}"] = (
+                val  # add the '_i' to indicate parameter for agent i
+            )
         learnable_pars_init[f"A_{i}"] = A_l_inac
         learnable_pars_init[f"B_{i}"] = B_l_inac
         for j in range(n):
             if i != j:
                 if Adj[i][j] == 1:
-                    learnable_pars_init[
-                        f"A_c_{i}_{j}"
-                    ] = A_c_l_inac  # add the '_i_j' to indicate coupling matrix from j to i
+                    learnable_pars_init[f"A_c_{i}_{j}"] = (
+                        A_c_l_inac  # add the '_i_j' to indicate coupling matrix from j to i
+                    )
 
     def __init__(self) -> None:
         N = self.horizon
