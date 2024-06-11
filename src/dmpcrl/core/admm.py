@@ -73,7 +73,7 @@ class AdmmCoordinator:
         self.rho = rho
 
         # create auxillary vars for ADMM procedure
-        self.y = np.zeros((self.n, nx_l, N + 1))
+        self.y = [np.zeros((nx_l*len(self.G[i]), N + 1)) for i in range(self.n)]    # multipliers
         # self.y_list: list[np.ndarray] = []  # dual vars
         # self.x_temp: list[np.ndarray] = []  # intermediate numerical values for x
         self.z = np.zeros((self.n, nx_l, N + 1))
@@ -83,13 +83,9 @@ class AdmmCoordinator:
         #     # self.y_list.append(np.zeros((x_dim, N + 1)))
         #     # self.x_temp_list.append(np.zeros((x_dim, N + 1)))
 
-        # # generate slices of z for each agent, slices that will pull the relevant
-        # # component of global variable out for the agents
-        # z_slices: list[list[int]] = []
-        # for i in range(self.n):
-        #     z_slices.append([])
-        #     for j in self.G[i]:
-        #         z_slices[i] += list(np.arange(nx_l * j, nx_l * (j + 1)))
+        # generate slices of z for each agent, slices that will pull the relevant
+        # component of global variable out for the agents
+        # z_slices = [np.concatenate([np.arange(nx_l * j, nx_l * (j + 1)) for j in self.G[i]]) for i in range(self.n)]
         # self.z_slices = z_slices
 
     # TODO check if numpy arrays or DM's passed, also check return types
@@ -114,23 +110,18 @@ class AdmmCoordinator:
 
         loc_action_list = [None] * len(self.agents)
         local_sol_list = [None] * len(self.agents)
+        x_l = np.split(state, self.n)  # split global state into local states
 
         for _ in range(self.iters):
             # x update: solve local minimisations
             for i in range(len(self.agents)):
-                loc_state = state[
-                    self.nx_l * i : self.nx_l * (i + 1), :
-                ]  # get local state from global
-
                 # set parameters in augmented lagrangian
-                self.agents[i].fixed_parameters["y"] = self.y_list[i]
-                self.agents[i].fixed_parameters["z"] = self.z[
-                    self.z_slices[i], :
-                ]  # use z slice to extract relevant z component
+                self.agents[i].fixed_parameters["y"] = self.y[i]
+                self.agents[i].fixed_parameters["z"] = self.z[self.G[i], :]  # G[i] is the agent indices relevant to agent i
 
                 if action is None:
                     loc_action_list[i], local_sol_list[i] = self.agents[i].state_value(
-                        loc_state, deterministic
+                        x_l[0], deterministic
                     )
                 else:
                     # get local action from global

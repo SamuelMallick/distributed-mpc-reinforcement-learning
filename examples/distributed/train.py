@@ -78,6 +78,7 @@ agent = Log(  # type: ignore[var-annotated]
             admm_iters=50,
             consensus_iters=100,
             distributed_fixed_parameters=fixed_dist_parameters_list,
+            # exploration=None,   # TODO new mpc
             exploration=EpsilonGreedyExploration(
                 epsilon=ExponentialScheduler(0.7, factor=0.99),
                 strength=0.5 * (u_bnd[1, 0] - u_bnd[0, 0]),

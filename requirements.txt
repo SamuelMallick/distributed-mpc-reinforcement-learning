@@ -1,5 +1,5 @@
 csnlp>=1.5.7
-mpcrl>=1.1.7
+mpcrl>=1.2.1.rc3
 numpy>=1.24.4
 casadi>=3.6.3
 scipy>=1.11.0

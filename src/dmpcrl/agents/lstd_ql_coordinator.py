@@ -217,9 +217,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             exploration_list = [None] * self.n
             if exploration is not None:
                 for i in range(self.n):
-                    new_exp = deepcopy(exploration).reset(
-                        seed=i
-                    )  # copying and reseting with new seed, avoiding identical exploration between agents
+                    new_exp = deepcopy(exploration)
+                    new_exp.reset(seed=i)  # copying and reseting with new seed, avoiding identical exploration between agents
                     exploration_list[i] = (
                         StepWiseExploration(  # convert to stepwise exploration such that exploration is not changed within ADMM iterations
                             new_exp, admm_iters, stepwise_decay=False
