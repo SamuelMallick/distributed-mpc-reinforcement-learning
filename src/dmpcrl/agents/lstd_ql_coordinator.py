@@ -1,6 +1,6 @@
 from collections.abc import Collection
 from copy import deepcopy
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Tuple
 from warnings import warn
 
 import casadi as cs
@@ -186,7 +186,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         # coordinator is itself a learning agent
         super().__init__(
             (
-                centralized_mpc if centralized_flag or centralized_debug else deepcopy(distributed_mpcs[0])
+                centralized_mpc
+                if centralized_flag or centralized_debug
+                else deepcopy(distributed_mpcs[0])
             ),  # if not centralized, use the first agent's mpc to satisfy the parent class
             update_strategy,
             discount_factor,
@@ -432,7 +434,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         raises: bool = True,
     ) -> float:
         """Trains the agents on a single episode. Overiding the parent class method to handle distributed learning.
-        
+
         Parameters
         ----------
         env : Env
@@ -453,7 +455,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         rewards = 0.0
         state = init_state
         action_space = getattr(env, "action_space", None)
-        
+
         # get first action
         joint_action, solV_list = self.distributed_state_value(
             state, deterministic=False, action_space=action_space
@@ -467,7 +469,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
         while not (truncated or terminated):
             # compute Q(s,a)
-            solQ_list =  self.distributed_action_value(state, joint_action)
+            solQ_list = self.distributed_action_value(state, joint_action)
             if self.centralized_debug:
                 solQ = self.action_value(state, action)
                 self.validate_dual_variables(solQ, solQ_list)
@@ -498,11 +500,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             Q_f_vec = np.asarray([sol.f for sol in solQ_list])
             V_f_con = self.consensus_coordinator.average_consensus(V_f_vec)
             Q_f_con = self.consensus_coordinator.average_consensus(Q_f_vec)
-            if not np.allclose(V_f_con, V_f_con[0], tolerance=1e-04) or not np.allclose(
-                Q_f_con, Q_f_con[0], tolerance=1e-04
+            if not np.allclose(V_f_con, V_f_con[0], atol=1e-04) or not np.allclose(
+                Q_f_con, Q_f_con[0], atol=1e-04
             ):
                 warn(
-                    "Consensus on value functions innacurate. Max difference in V: {np.max(np.abs(V_f_con - V_f_con[0]))}, Max difference in Q: {np.max(np.abs(Q_f_con - Q_f_con[0]))}"
+                    f"Consensus on value functions innacurate. Max difference in V: {np.max(np.abs(V_f_con - V_f_con[0]))}, Max difference in Q: {np.max(np.abs(Q_f_con - Q_f_con[0]))}"
                 )
 
             if dist_costs is None:  # agents get direct access to centralized cost
@@ -511,7 +513,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 cost_con = self.consensus_coordinator.average_consensus(
                     np.asarray(dist_costs)
                 )
-                if not np.allclose(cost_con, cost_con[0], tolerance=1e-04):
+                if not np.allclose(cost_con, cost_con[0], atol=1e-04):  # TODO type error
                     warn(
                         f"Consensus on costs innacurate. Max difference: {np.max(np.abs(cost_con - cost_con[0]))}"
                     )
@@ -561,39 +563,23 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         """
         if constraint_type == "dynamics":
             cent_duals = centralized_sol.dual_vals["lam_g_dyn"]
-            dist_duals = np.asarray([[distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"] for k in range(self.N)] for i in range(self.n)])
-            dist_duals = dist_duals.reshape((-1, self.N), order="C")
-            dist_duals = dist_duals.reshape((-1,), order="F")
-            # dist_duals = [
-            #     np.hstack(
-            #         [
-            #             distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"]
-            #             for k in range(self.N)
-            #         ]
-            #     )
-            #     for i in range(self.n)
-            # ]
-            # cent_duals_list: list = []
-            # for i in range(self.n):
-            #     cent_duals_list.append(np.zeros((self.nx_l, self.N)))
-            #     for k in range(self.N):  # TODO get rid of loop, make it way nicer
-            #         # dist_duals_list_dyn[i][:, [k]] = np.array(
-            #         #     solQ_list[i].dual_vals[f"lam_g_dynam_{k}"]
-            #         # )
-            #         cent_duals_list[i][:, [k]] = np.array(
-            #             cent_duals[
-            #                 (self.nx_l * len(self.agents) * k + self.nx_l * i) : (
-            #                     self.nx_l * len(self.agents) * k + self.nx_l * (i + 1)
-            #                 )
-            #             ]
-            #         )
-            dynam_duals_error = np.linalg.norm(
-                cent_duals
-                - dist_duals
-            )
+            # reshape to match centralised duals
+            dist_duals = np.asarray(
+                [
+                    [
+                        distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"]
+                        for k in range(self.N)
+                    ]
+                    for i in range(self.n)
+                ]
+            )  # shape: (n, N, nx, 1)
+            dist_duals = dist_duals.transpose(0, 2, 1, 3)  # shape: (n, nx, N, 1)
+            dist_duals = dist_duals.reshape((-1, self.N), order="C")  # shape: (n*nx, N)
+            dist_duals = dist_duals.reshape((-1,), order="F")  # shape: (n*nx*N,)
+            dynam_duals_error = np.linalg.norm(cent_duals - dist_duals)
             if dynam_duals_error > 1e-04:
                 warn(
-                    "Dual variables for dynamics constraints do not match between centralised and distributed solutions."
+                    f"Total error of {dynam_duals_error} in distributed dual variables for dynamics."
                 )
         else:
             raise ValueError(
@@ -601,8 +587,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             )
 
     def distributed_state_value(
-        self, state: cs.DM, deterministic=False, action_space: Optional[Box] = None,
-    ):  # TODO add return types, also below
+        self,
+        state: np.ndarray,
+        deterministic=False,
+        action_space: Optional[Box] = None,
+    ) -> Tuple[cs.DM, list[Solution]]:
         """Computes the distributed state value function using ADMM.
 
         Parameters
@@ -617,14 +606,12 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             local_actions,
             local_sols,
             info_dict,
-        ) = self.admm_coordinator.solve_admm(state, deterministic=deterministic, action_space=action_space)
-        import matplotlib.pyplot as plt
-        u = info_dict["u_iters"]
-        # plt.plot(u[:, 1, 0, 0])
-        # plt.show()
+        ) = self.admm_coordinator.solve_admm(
+            state, deterministic=deterministic, action_space=action_space
+        )
         return cs.DM(local_actions), local_sols
 
-    def distributed_action_value(self, state: cs.DM, action: cs.DM):  # TODO check types
+    def distributed_action_value(self, state: np.ndarray, action: cs.DM) -> list[Solution]:  # TODO check types
         """Computes the distributed action value function using ADMM.
 
         Parameters
@@ -637,9 +624,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             If `True`, the cost of the MPC is perturbed according to the exploration
             strategy to induce some exploratory behaviour. Otherwise, no perturbation is
             performed. By default, `deterministic=False`."""
-        (
-            _,
-            local_sols,
-            _
-        ) = self.admm_coordinator.solve_admm(state, action=action, deterministic=True)
+        (_, local_sols, _) = self.admm_coordinator.solve_admm(
+            state, action=action, deterministic=True
+        )
         return local_sols
