@@ -45,16 +45,14 @@ class MpcAdmm(Mpc[cs.SX]):
         ValueError
             Raises if the shooting method is invalid; or if any of the horizons are
             invalid."""
-        self._fixed_pars_init = {}
-
+        self._fixed_pars_init: dict = {}
         super().__init__(
             nlp, prediction_horizon, control_horizon, input_spacing, shooting
         )
         self.N = prediction_horizon
 
     @property
-    def fixed_pars_init(self) -> int:
-        """Gets the prediction horizon of the MPC controller."""
+    def fixed_pars_init(self) -> dict:
         return self._fixed_pars_init
 
     @fixed_pars_init.setter
@@ -64,18 +62,25 @@ class MpcAdmm(Mpc[cs.SX]):
             "Can't set the value of fixed_pars_init. You can only add too it."
         )
 
-    def augmented_state(self, num_neighbours, my_index, size: int = 1):
+    def augmented_state(
+        self, num_neighbours: int, my_index: int, size: int
+    ) -> tuple[cs.SX, cs.SX]:
         """Generates the local state and variables for the copies of neighbour
         states over the prediction horizon
 
         Parameters
         ----------
-        num_neighbours
-            Number of neighbours coupled to this agent.
-        my_index
-            The index of the agents local state in the augmented state.
-        size
-            Dimension of local state.
+        num_neighbours : int
+            Number of neighbours of the agent
+        my_index : int
+            Index of the agents local state within its augmented state
+        size : int
+            Number of elements in local
+
+        Returns
+        -------
+        Tuple[cs.SX, cs.SX]
+            The local state and the neighbour states over the prediction horizon
         """
 
         x, _ = self.state("x", size)  # local state
@@ -106,9 +111,16 @@ class MpcAdmm(Mpc[cs.SX]):
             "For ADMM based MPC the dynamics must be set manually as constraints due to the coupling."
         )
 
-    def set_local_cost(self, local_cost: cs.SX, rho: float = 0.5):
+    def set_local_cost(self, local_cost: cs.SX, rho: float = 0.5) -> None:
         """Sets the cost function for the ADMM based MPC. The augmented lagrangian
-        terms are augmented to the local cost."""
+        terms are augmented to the local cost.
+
+        Parameters
+        ----------
+        local_cost : cs.SX
+            The local cost function.
+        rho : float, optional
+            The penalty term for the augmented lagrangian. Default is 0.5."""
 
         if not hasattr(self, "x_cat"):
             raise RuntimeError(

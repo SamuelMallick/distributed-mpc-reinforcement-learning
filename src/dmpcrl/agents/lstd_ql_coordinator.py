@@ -1,6 +1,6 @@
 from collections.abc import Collection
 from copy import deepcopy
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, Literal
 from warnings import warn
 
 import casadi as cs
@@ -12,11 +12,7 @@ from gymnasium import Env
 from gymnasium.spaces import Box
 from mpcrl import LstdQLearningAgent
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import (
-    ExplorationStrategy,
-    NoExploration,
-    StepWiseExploration,
-)
+from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.core.warmstart import WarmStartStrategy
@@ -201,7 +197,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             (
                 centralized_fixed_parameters
                 if centralized_flag or centralized_debug
-                else deepcopy(distributed_fixed_parameters[0])
+                else deepcopy(
+                    distributed_fixed_parameters[0]
+                    if distributed_fixed_parameters
+                    else {}
+                )  # check not None before indexing
             ),  # if not centralized, use the first agent's fixed params to satisfy the parent class
             exploration,
             experience,
@@ -213,8 +213,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             name,
         )
 
-        if (
-            not centralized_flag
+        if not centralized_flag and isinstance(
+            distributed_fixed_parameters, list
         ):  # coordinates the distributed learning, rather than doing the learning itself
             exploration_list = [None] * self.n
             if exploration is not None:
@@ -236,7 +236,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         discount_factor,
                         deepcopy(optimizer),
                         distributed_learnable_parameters[i],
-                        distributed_fixed_parameters[i],  # TODO resolve typing
+                        distributed_fixed_parameters[i],
                         exploration_list[i],
                         deepcopy(experience),
                         warmstart,
@@ -400,11 +400,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 agent.on_episode_start(env, episode, state)
 
             while not (truncated or terminated):
-                joint_action, sol_list, error_flag = self.distributed_state_value(
+                joint_action, sol_list = self.distributed_state_value(
                     state, deterministic=deterministic
                 )
-                if error_flag:  # TODO do we need this?
-                    return returns
 
                 state, r, truncated, terminated, _ = env.step(joint_action)
                 self.on_env_step(env, episode, timestep)
@@ -508,12 +506,12 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 )
 
             if dist_costs is None:  # agents get direct access to centralized cost
-                cost_con = [cost] * self.n
+                cost_con = np.full((self.n,), cost)
             else:  # agents use consensus to get the centralized cost from local costs
                 cost_con = self.consensus_coordinator.average_consensus(
                     np.asarray(dist_costs)
                 )
-                if not np.allclose(cost_con, cost_con[0], atol=1e-04):  # TODO type error
+                if not np.allclose(cost_con, cost_con[0], atol=1e-04):
                     warn(
                         f"Consensus on costs innacurate. Max difference: {np.max(np.abs(cost_con - cost_con[0]))}"
                     )
@@ -590,8 +588,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self,
         state: np.ndarray,
         deterministic=False,
-        action_space: Optional[Box] = None,
-    ) -> Tuple[cs.DM, list[Solution]]:
+        action_space: Box | None = None,
+    ) -> tuple[cs.DM, list[Solution]]:
         """Computes the distributed state value function using ADMM.
 
         Parameters
@@ -611,7 +609,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         )
         return cs.DM(local_actions), local_sols
 
-    def distributed_action_value(self, state: np.ndarray, action: cs.DM) -> list[Solution]:  # TODO check types
+    def distributed_action_value(
+        self, state: np.ndarray, action: cs.DM
+    ) -> list[Solution]:
         """Computes the distributed action value function using ADMM.
 
         Parameters

@@ -1,10 +1,13 @@
-from typing import Any, Optional
+from typing import Any
+
 import casadi as cs
-from csnlp import Solution
 import numpy as np
-from mpcrl import Agent
-from dmpcrl.mpc.mpc_admm import MpcAdmm
+from csnlp import Solution
 from gymnasium.spaces import Box
+from mpcrl import Agent
+
+from dmpcrl.mpc.mpc_admm import MpcAdmm
+
 
 class AdmmCoordinator:
     """Class for coordinating the ADMM procedure of a network of agents"""
@@ -81,15 +84,14 @@ class AdmmCoordinator:
         self.augmented_x = [
             np.zeros((nx_l * len(self.G[i]), N + 1)) for i in range(self.n)
         ]  # augmented states
-        self.z = np.zeros((self.n, nx_l, N + 1))    # global copies of local states
+        self.z = np.zeros((self.n, nx_l, N + 1))  # global copies of local states
 
-    # TODO check if numpy arrays or DM's passed, also check return types
     def solve_admm(
         self,
         state: np.ndarray,
-        action: np.ndarray | None = None,
+        action: cs.DM | None = None,
         deterministic: bool = True,
-        action_space: Optional[Box] = None,
+        action_space: Box | None = None,
     ) -> tuple[np.ndarray, list[Solution], dict[str, Any]]:
         """Solve the mpc problem for the network of agents using ADMM. If an
         action provided, the first action is constrained to be the provided action.
@@ -113,14 +115,16 @@ class AdmmCoordinator:
         tuple[np.ndarray, list[Solution], dict[str, Any]
             A tuple containing the local actions, local solutions, and an info dictionary
         """
-        u_iters = np.empty((self.iters, self.n, self.nu_l, self.N))  # store actions over iterations
+        u_iters = np.empty(
+            (self.iters, self.n, self.nu_l, self.N)
+        )  # store actions over iterations
 
         loc_actions = np.empty((self.n, self.nu_l))
         local_sols: list[Solution] = [None] * len(self.agents)
         x_l = np.split(state, self.n)  # split global state and action into local states
-        u_l = (
-            np.split(action, self.n) if action is not None else [None] * self.n
-        )  # TODO type error on the None
+        u_l: list[np.ndarray] | None = (
+            np.split(action, self.n) if action is not None else None
+        )
 
         for iter in range(self.iters):
             # x update: solve local minimisations
@@ -140,8 +144,10 @@ class AdmmCoordinator:
                     local_sols[i] = self.agents[i].action_value(x_l[i], u_l[i])
                 if not local_sols[i].success:
                     # not raising an error on MPC failures
-                    u_iters[iter, i] = np.nan # TODO check that this sets all elements
-                    self.agents[i].on_mpc_failure(episode=0, status=local_sols[i].status, raises=False) 
+                    u_iters[iter, i] = np.nan
+                    self.agents[i].on_mpc_failure(
+                        episode=0, status=local_sols[i].status, raises=False
+                    )
                 else:
                     u_iters[iter, i] = local_sols[i].vals["u"]
 
@@ -178,5 +184,5 @@ class AdmmCoordinator:
         return (
             loc_actions,
             local_sols,
-            {"u_iters": u_iters}
+            {"u_iters": u_iters},
         )  # return actions and solutions from last ADMM iter
