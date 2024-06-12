@@ -1,6 +1,6 @@
 from collections.abc import Collection
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from warnings import warn
 
 import casadi as cs
@@ -186,19 +186,19 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         # coordinator is itself a learning agent
         super().__init__(
             (
-                centralized_mpc if centralized_flag else deepcopy(distributed_mpcs[0])
+                centralized_mpc if centralized_flag or centralized_debug else deepcopy(distributed_mpcs[0])
             ),  # if not centralized, use the first agent's mpc to satisfy the parent class
             update_strategy,
             discount_factor,
             optimizer,
             (
                 centralized_learnable_parameters
-                if centralized_flag
+                if centralized_flag or centralized_debug
                 else deepcopy(distributed_learnable_parameters[0])
             ),  # if not centralized, use the first agent's learnable params to satisfy the parent class
             (
                 centralized_fixed_parameters
-                if centralized_flag
+                if centralized_flag or centralized_debug
                 else deepcopy(distributed_fixed_parameters[0])
             ),  # if not centralized, use the first agent's fixed params to satisfy the parent class
             exploration,
@@ -218,7 +218,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if exploration is not None:
                 for i in range(self.n):
                     new_exp = deepcopy(exploration)
-                    new_exp.reset(seed=i)  # copying and reseting with new seed, avoiding identical exploration between agents
+                    new_exp.reset(
+                        seed=i
+                    )  # copying and reseting with new seed, avoiding identical exploration between agents
                     exploration_list[i] = (
                         StepWiseExploration(  # convert to stepwise exploration such that exploration is not changed within ADMM iterations
                             new_exp, admm_iters, stepwise_decay=False
@@ -232,7 +234,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                         discount_factor,
                         deepcopy(optimizer),
                         distributed_learnable_parameters[i],
-                        distributed_fixed_parameters[i],
+                        distributed_fixed_parameters[i],  # TODO resolve typing
                         exploration_list[i],
                         deepcopy(experience),
                         warmstart,
@@ -261,7 +263,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self,
         env: Env,
         episodes: int,
-        seed: RngType = None,  # TODO resolve type hinting
+        seed: RngType = None,
         raises: bool = True,
         env_reset_options: dict[str, Any] | None = None,
     ) -> npt.NDArray[np.floating]:
@@ -335,7 +337,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         env: Env,
         episodes: int,
         deterministic: bool = True,
-        seed: RngType = None,  # TODO resolve type hinting
+        seed: RngType = None,
         raises: bool = True,
         env_reset_options: dict[str, Any] | None = None,
     ) -> npt.NDArray[np.floating]:
@@ -396,7 +398,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 agent.on_episode_start(env, episode, state)
 
             while not (truncated or terminated):
-                joint_action, sol_list, error_flag = self.distributed_state_value(state)
+                joint_action, sol_list, error_flag = self.distributed_state_value(
+                    state, deterministic=deterministic
+                )
                 if error_flag:  # TODO do we need this?
                     return returns
 
@@ -427,6 +431,20 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         init_state: np.ndarray,
         raises: bool = True,
     ) -> float:
+        """Trains the agents on a single episode. Overiding the parent class method to handle distributed learning.
+        
+        Parameters
+        ----------
+        env : Env
+            The environment to train in.
+        episode : int
+            The current episode number.
+        init_state : np.ndarray
+            The initial state of the environment.
+        raises : bool, optional
+            Only valid for centralized training. If `True`, when any of the MPC solver runs fails, or when an update fails,
+            the corresponding error is raised; otherwise, only a warning is raised. For distributed training
+            local errors do not raise exceptions."""
         if self.centralized_flag:
             return super().train_one_episode(env, episode, init_state, raises)
 
@@ -435,17 +453,11 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         rewards = 0.0
         state = init_state
         action_space = getattr(env, "action_space", None)
-        # NOTE: if no exploration is set, then we can get away by solving one MPC per
-        # iteration, instead of two. The reason is that `a=argmin V(s)` and `min Q(s,a)`
-        # are the same thing, because `a` has not been modified by any perturbation.
-        no_exploration = isinstance(
-            self.exploration, NoExploration
-        )  # TODO aask Filippo if this can be checked every iteration, e.g., for eps greedy only resolve Q eps perceentatge of the time
-        # TODO shouldn't we be setting deterministic = True at some point for exploration?
-        # solve for the first action
-        joint_action, solV_list, error_flag = self.distributed_state_value(
-            state
-        )  # TODO check error handling and pass action space
+        
+        # get first action
+        joint_action, solV_list = self.distributed_state_value(
+            state, deterministic=False, action_space=action_space
+        )
         if self.centralized_debug:
             action, solV = self.state_value(
                 state, False, action_space=action_space
@@ -454,19 +466,10 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 self.on_mpc_failure(episode, None, solV.status, raises)
 
         while not (truncated or terminated):
-            # compute Q(s,a), or copy V(s) if no exploration is set
-            solQ_list, error_flag = (
-                solV_list,
-                (
-                    error_flag
-                    if no_exploration
-                    else self.distributed_action_value(state, joint_action)
-                ),
-            )
-            if error_flag:  # TODO best way to handle errors?
-                return rewards
+            # compute Q(s,a)
+            solQ_list =  self.distributed_action_value(state, joint_action)
             if self.centralized_debug:
-                solQ = solV if no_exploration else self.action_value(state, action)
+                solQ = self.action_value(state, action)
                 self.validate_dual_variables(solQ, solQ_list)
 
             # step the system with action computed at the previous iteration
@@ -480,11 +483,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 agent.on_env_step(env, episode, timestep)
 
             # compute V(s+) and store transition
-            new_joint_action, solV_list, error_flag = self.distributed_state_value(
-                new_state
+            new_joint_action, solV_list = self.distributed_state_value(
+                new_state, deterministic=False
             )
-            if error_flag:  # TODO best way to handle errors?
-                return rewards
             if self.centralized_debug:
                 _, solV = self.state_value(new_state, False, action_space=action_space)
                 if not self._try_store_experience(cost, solQ, solV):
@@ -560,32 +561,35 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         """
         if constraint_type == "dynamics":
             cent_duals = centralized_sol.dual_vals["lam_g_dyn"]
-            dist_duals = [
-                np.hstack(
-                    [
-                        distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"]
-                        for k in range(self.N)
-                    ]
-                )
-                for i in range(self.n)
-            ]
-            cent_duals_list: list = []
-            for i in range(self.n):
-                cent_duals_list.append(np.zeros((self.nx_l, self.N)))
-                for k in range(self.N):  # TODO get rid of loop, make it way nicer
-                    # dist_duals_list_dyn[i][:, [k]] = np.array(
-                    #     solQ_list[i].dual_vals[f"lam_g_dynam_{k}"]
-                    # )
-                    cent_duals_list[i][:, [k]] = np.array(
-                        cent_duals[
-                            (self.nx_l * len(self.agents) * k + self.nx_l * i) : (
-                                self.nx_l * len(self.agents) * k + self.nx_l * (i + 1)
-                            )
-                        ]
-                    )
+            dist_duals = np.asarray([[distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"] for k in range(self.N)] for i in range(self.n)])
+            dist_duals = dist_duals.reshape((-1, self.N), order="C")
+            dist_duals = dist_duals.reshape((-1,), order="F")
+            # dist_duals = [
+            #     np.hstack(
+            #         [
+            #             distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"]
+            #             for k in range(self.N)
+            #         ]
+            #     )
+            #     for i in range(self.n)
+            # ]
+            # cent_duals_list: list = []
+            # for i in range(self.n):
+            #     cent_duals_list.append(np.zeros((self.nx_l, self.N)))
+            #     for k in range(self.N):  # TODO get rid of loop, make it way nicer
+            #         # dist_duals_list_dyn[i][:, [k]] = np.array(
+            #         #     solQ_list[i].dual_vals[f"lam_g_dynam_{k}"]
+            #         # )
+            #         cent_duals_list[i][:, [k]] = np.array(
+            #             cent_duals[
+            #                 (self.nx_l * len(self.agents) * k + self.nx_l * i) : (
+            #                     self.nx_l * len(self.agents) * k + self.nx_l * (i + 1)
+            #                 )
+            #             ]
+            #         )
             dynam_duals_error = np.linalg.norm(
-                cent_duals_list[0]
-                - dist_duals[0]  # TODO make it summed accross all agents not just 1
+                cent_duals
+                - dist_duals
             )
             if dynam_duals_error > 1e-04:
                 warn(
@@ -596,24 +600,31 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 f"Constraint type {constraint_type} not supported for dual variable validation."
             )
 
-    def distributed_state_value(self, state):
+    def distributed_state_value(
+        self, state: cs.DM, deterministic=False, action_space: Optional[Box] = None,
+    ):  # TODO add return types, also below
         """Computes the distributed state value function using ADMM.
 
         Parameters
         ----------
         state : cs.DM
-            The centralized state for which to compute the value function."""
+            The centralized state for which to compute the value function.
+        deterministic : bool, optional
+            If `True`, the cost of the MPC is perturbed according to the exploration
+            strategy to induce some exploratory behaviour. Otherwise, no perturbation is
+            performed. By default, `deterministic=False`."""
         (
-            local_action_list,
-            local_sol_list,
-            error_flag,
-        ) = self.admm_coordinator.solve_admm(state)
-        if not error_flag:
-            return cs.DM(local_action_list), local_sol_list, error_flag
-        else:
-            return None, local_sol_list, error_flag
+            local_actions,
+            local_sols,
+            info_dict,
+        ) = self.admm_coordinator.solve_admm(state, deterministic=deterministic, action_space=action_space)
+        import matplotlib.pyplot as plt
+        u = info_dict["u_iters"]
+        # plt.plot(u[:, 1, 0, 0])
+        # plt.show()
+        return cs.DM(local_actions), local_sols
 
-    def distributed_action_value(self, state, action):
+    def distributed_action_value(self, state: cs.DM, action: cs.DM):  # TODO check types
         """Computes the distributed action value function using ADMM.
 
         Parameters
@@ -621,10 +632,14 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         state : cs.DM
             The centralized state for which to compute the value function.
         action : cs.DM
-            The centralized action for which to compute the value function."""
+            The centralized action for which to compute the value function.
+        deterministic : bool, optional
+            If `True`, the cost of the MPC is perturbed according to the exploration
+            strategy to induce some exploratory behaviour. Otherwise, no perturbation is
+            performed. By default, `deterministic=False`."""
         (
             _,
-            local_sol_list,
-            error_flag,
-        ) = self.admm_coordinator.solve_admm(state, action=action)
-        return local_sol_list, error_flag
+            local_sols,
+            _
+        ) = self.admm_coordinator.solve_admm(state, action=action, deterministic=True)
+        return local_sols

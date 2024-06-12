@@ -92,7 +92,7 @@ agent = Log(  # type: ignore[var-annotated]
             centralized_mpc=mpc,
             centralized_learnable_parameters=learnable_pars,
             centralized_flag=False,
-            centralized_debug=False,
+            centralized_debug=True,
         )
     ),
     level=logging.DEBUG,

@@ -1,9 +1,10 @@
+from typing import Any, Optional
 import casadi as cs
 from csnlp import Solution
 import numpy as np
 from mpcrl import Agent
 from dmpcrl.mpc.mpc_admm import MpcAdmm
-
+from gymnasium.spaces import Box
 
 class AdmmCoordinator:
     """Class for coordinating the ADMM procedure of a network of agents"""
@@ -88,7 +89,8 @@ class AdmmCoordinator:
         state: np.ndarray,
         action: np.ndarray | None = None,
         deterministic: bool = True,
-    ) -> tuple[list[np.ndarray], list[Solution]]:
+        action_space: Optional[Box] = None,
+    ) -> tuple[np.ndarray, list[Solution], dict[str, Any]]:
         """Solve the mpc problem for the network of agents using ADMM. If an
         action provided, the first action is constrained to be the provided action.
 
@@ -102,21 +104,25 @@ class AdmmCoordinator:
             If `True`, the cost of the MPC is perturbed according to the exploration
             strategy to induce some exploratory behaviour. Otherwise, no perturbation is
             performed.
+        action_space: Optional[Box]
+            Only applicable if action=None. The action space of the environment. If provided, the action is clipped to
+            the action space.
 
         Returns
         -------
-        tuple[list[np.ndarray], list[Solution]]
-            A tuple containing the local actions, and local solutions
+        tuple[np.ndarray, list[Solution], dict[str, Any]
+            A tuple containing the local actions, local solutions, and an info dictionary
         """
+        u_iters = np.empty((self.iters, self.n, self.nu_l, self.N))  # store actions over iterations
 
-        loc_action_list: list[np.ndarray] = [None] * len(self.agents)   # TODO type error on the None
-        local_sol_list: list[Solution] = [None] * len(self.agents)
+        loc_actions = np.empty((self.n, self.nu_l))
+        local_sols: list[Solution] = [None] * len(self.agents)
         x_l = np.split(state, self.n)  # split global state and action into local states
         u_l = (
             np.split(action, self.n) if action is not None else [None] * self.n
         )  # TODO type error on the None
 
-        for _ in range(self.iters):
+        for iter in range(self.iters):
             # x update: solve local minimisations
             for i in range(len(self.agents)):
                 # set parameters in augmented lagrangian
@@ -127,20 +133,23 @@ class AdmmCoordinator:
                 )
 
                 if action is None:
-                    loc_action_list[i], local_sol_list[i] = self.agents[i].state_value(
-                        x_l[i], deterministic=deterministic
+                    loc_actions[i], local_sols[i] = self.agents[i].state_value(
+                        x_l[i], deterministic=deterministic, action_space=action_space
                     )
                 else:
-                    local_sol_list[i] = self.agents[i].action_value(x_l[i], u_l[i])
-                if not local_sol_list[i].success:
+                    local_sols[i] = self.agents[i].action_value(x_l[i], u_l[i])
+                if not local_sols[i].success:
                     # not raising an error on MPC failures
-                    self.agents[i].on_mpc_failure(episode=0, status=local_sol_list[i].status, raises=False) 
+                    u_iters[iter, i] = np.nan # TODO check that this sets all elements
+                    self.agents[i].on_mpc_failure(episode=0, status=local_sols[i].status, raises=False) 
+                else:
+                    u_iters[iter, i] = local_sols[i].vals["u"]
 
                 # construct solution to augmented state from local state and coupled states
                 self.augmented_x[i] = cs.vertcat(
-                    local_sol_list[i].vals["x_c"][: self.nx_l * self.G[i].index(i), :],
-                    local_sol_list[i].vals["x"],
-                    local_sol_list[i].vals["x_c"][self.nx_l * self.G[i].index(i) :, :],
+                    local_sols[i].vals["x_c"][: self.nx_l * self.G[i].index(i), :],
+                    local_sols[i].vals["x"],
+                    local_sols[i].vals["x_c"][self.nx_l * self.G[i].index(i) :, :],
                 )
 
             # z update: an averaging of all agents' optinions on each z
@@ -167,6 +176,7 @@ class AdmmCoordinator:
                 )
 
         return (
-            loc_action_list,
-            local_sol_list,
+            loc_actions,
+            local_sols,
+            {"u_iters": u_iters}
         )  # return actions and solutions from last ADMM iter
