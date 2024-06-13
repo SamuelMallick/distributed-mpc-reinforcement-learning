@@ -9,7 +9,7 @@ from csnlp.wrappers import Mpc
 from env import LtiSystem
 from gymnasium.wrappers import TimeLimit
 from learnable_mpc import CentralizedMpc, LocalMpc
-from model import get_adj, get_bounds, get_model_details
+from model import Model
 from mpcrl import LearnableParameter, LearnableParametersDict, optim
 from mpcrl.core.schedulers import ExponentialScheduler
 from mpcrl.wrappers.agents import Log, RecordUpdates
@@ -17,45 +17,33 @@ from mpcrl.wrappers.envs import MonitorEpisodes
 
 from dmpcrl.agents.lstd_ql_coordinator import LstdQLearningAgentCoordinator
 from dmpcrl.core.admm import AdmmCoordinator
-
-CENTRALISED = False
-
-Adj = get_adj()
-G = AdmmCoordinator.g_map(Adj)  # mapping from global var to local var indexes for ADMM
+ 
+prediction_horizon = 10
 rho = 0.5
-n, nx_l, nu_l = get_model_details()
-_, u_bnd, _ = get_bounds()
-
-# now, let's create the instances of such classes and start the training
+model = Model()
+G = AdmmCoordinator.g_map(model.adj)
 # centralised mpc and params
-mpc = CentralizedMpc()
-learnable_pars = LearnableParametersDict[cs.SX](
+centralized_mpc = CentralizedMpc(model, prediction_horizon)
+centralized_learnable_pars = LearnableParametersDict[cs.SX](
     (
-        LearnableParameter(name, val.shape, val, sym=mpc.parameters[name])
-        for name, val in mpc.learnable_pars_init.items()
+        LearnableParameter(name, val.shape, val, sym=centralized_mpc.parameters[name])
+        for name, val in centralized_mpc.learnable_pars_init.items()
     )
 )
 
 # distributed mpc and params
-mpc_dist_list: list[Mpc] = []
-learnable_dist_parameters_list: list[LearnableParametersDict] = []
-fixed_dist_parameters_list: list = []
-for i in range(LtiSystem.n):
-    mpc_dist_list.append(
-        LocalMpc(num_neighbours=len(G[i]) - 1, my_index=G[i].index(i), rho=rho)
-    )
-    learnable_dist_parameters_list.append(
-        LearnableParametersDict[cs.SX](
+distributed_mpcs: list[LocalMpc] = [LocalMpc(model=model, prediction_horizon=prediction_horizon, num_neighbours=len(G[i]) - 1, my_index=G[i].index(i), rho=rho) for i in range(Model.n)]
+distributed_learnable_parameters: list[LearnableParametersDict] = [
+    LearnableParametersDict[cs.SX](
             (
                 LearnableParameter(
-                    name, val.shape, val, sym=mpc_dist_list[i].parameters[name]
+                    name, val.shape, val, sym=distributed_mpcs[i].parameters[name]
                 )
-                for name, val in mpc_dist_list[i].learnable_pars_init.items()
+                for name, val in distributed_mpcs[i].learnable_pars_init.items()
             )
-        )
-    )
-    fixed_dist_parameters_list.append(mpc_dist_list[i].fixed_pars_init)
-
+        ) for i in range(Model.n)
+]
+distributed_fixed_parameters: list = [distributed_mpcs[i].fixed_pars_init for i in range(Model.n)]
 
 env = MonitorEpisodes(TimeLimit(LtiSystem(), max_episode_steps=int(20e0)))
 agent = Log(  # type: ignore[var-annotated]
@@ -102,6 +90,7 @@ agent.train(env=env, episodes=1, seed=1)
 STORE_DATA = False
 PLOT = True
 
+# TODO completely restructure data saving
 # extract data
 if len(env.observations) > 0:
     X = env.observations[0].squeeze()
