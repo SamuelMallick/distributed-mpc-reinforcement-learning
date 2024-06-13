@@ -508,7 +508,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if dist_costs is None:  # agents get direct access to centralized cost
                 cost_con = np.full((self.n,), cost)
             else:  # agents use consensus to get the centralized cost from local costs
-                cost_con = self.consensus_coordinator.average_consensus(
+                cost_con = self.n*self.consensus_coordinator.average_consensus(
                     np.asarray(dist_costs)
                 )
                 if not np.allclose(cost_con, cost_con[0], atol=1e-04):
