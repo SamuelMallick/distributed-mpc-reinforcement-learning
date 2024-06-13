@@ -122,9 +122,7 @@ class AdmmCoordinator:
         loc_actions = np.empty((self.n, self.nu_l))
         local_sols: list[Solution] = [None] * len(self.agents)
         x_l = np.split(state, self.n)  # split global state and action into local states
-        u_l: list[np.ndarray] | None = (
-            np.split(action, self.n) if action is not None else None
-        )
+        u_l: list[np.ndarray] = np.split(action, self.n) if action is not None else []
 
         for iter in range(self.iters):
             # x update: solve local minimisations
