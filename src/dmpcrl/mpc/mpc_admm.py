@@ -46,8 +46,8 @@ class MpcAdmm(Mpc[cs.SX]):
             Raises if the shooting method is invalid; or if any of the horizons are
             invalid."""
         self._fixed_pars_init: dict = {}
-        super().__init__(
-            nlp, prediction_horizon, control_horizon, input_spacing, shooting
+        Mpc.__init__(
+            self, nlp, prediction_horizon, control_horizon, input_spacing, shooting
         )
         self.N = prediction_horizon
 
