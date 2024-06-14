@@ -394,7 +394,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
 
         for episode in range(
             episodes
-        ):  # TODO ask Filippo why no longer resetting for each ep?
+        ): 
             state, _ = env.reset(seed=mk_seed(rng), options=env_reset_options)
             truncated, terminated, timestep = False, False, 0
             self.on_episode_start(env, episode, state)
