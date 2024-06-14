@@ -144,7 +144,7 @@ class AdmmCoordinator:
                     # not raising an error on MPC failures
                     u_iters[iter, i] = np.nan
                     self.agents[i].on_mpc_failure(
-                        episode=0, status=local_sols[i].status, raises=False, timestep=0  
+                        episode=0, status=local_sols[i].status, raises=False, timestep=0
                     )
                 else:
                     u_iters[iter, i] = local_sols[i].vals["u"]
