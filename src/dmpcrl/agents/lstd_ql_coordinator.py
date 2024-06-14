@@ -42,7 +42,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         N: int,
         nx: int,
         nu: int,
-        Adj: np.ndarray,
+        adj: np.ndarray,
         rho: float,
         admm_iters: int,
         consensus_iters: int,
@@ -213,8 +213,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             name,
         )
 
-        if not centralized_flag and isinstance(
-            distributed_fixed_parameters, list
+        if (
+            not centralized_flag
         ):  # coordinates the distributed learning, rather than doing the learning itself
             exploration_list = [None] * self.n
             if exploration is not None:
@@ -252,14 +252,16 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             # ADMM and consensus coordinator objects
             self.admm_coordinator = AdmmCoordinator(
                 self.agents,
-                Adj,
+                adj,
                 N=N,
                 nx_l=nx,
                 nu_l=nu,
                 rho=rho,
                 iters=admm_iters,
             )
-            self.consensus_coordinator = ConsensusCoordinator(Adj, consensus_iters)
+            self.consensus_coordinator = ConsensusCoordinator(adj, consensus_iters)
+        else:
+            self.agents = []
 
     def train(
         self,
@@ -508,7 +510,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if dist_costs is None:  # agents get direct access to centralized cost
                 cost_con = np.full((self.n,), cost)
             else:  # agents use consensus to get the centralized cost from local costs
-                cost_con = self.n*self.consensus_coordinator.average_consensus(
+                cost_con = self.n * self.consensus_coordinator.average_consensus(
                     np.asarray(dist_costs)
                 )
                 if not np.allclose(cost_con, cost_con[0], atol=1e-04):

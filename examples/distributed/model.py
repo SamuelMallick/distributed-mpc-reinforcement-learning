@@ -1,10 +1,7 @@
 from typing import ClassVar
+
 import casadi as cs
 import numpy as np
-import scipy.linalg
-
-# TODO make static model class
-# TODO pass in np_random any time we need to use randomness
 
 
 class Model:
@@ -17,15 +14,23 @@ class Model:
     x_bnd_l: ClassVar[np.ndarray] = np.array(
         [[0, -1], [1, 1]]
     )  # local state bounds x_bnd[0] <= x <= x_bnd[1]
-    u_bnd_l: ClassVar[np.ndarray] = np.array([[-1], [1]])  # local control bounds u_bnd[0] <= u <= u_bnd[1]
+    u_bnd_l: ClassVar[np.ndarray] = np.array(
+        [[-1], [1]]
+    )  # local control bounds u_bnd[0] <= u <= u_bnd[1]
 
     adj: ClassVar[np.ndarray] = np.array(
         [[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype=np.int32
     )  # adjacency matrix of coupling in network
 
-    A_l: ClassVar[np.ndarray] = np.array([[0.9, 0.35], [0, 1.1]])  # local state-space matrix A
-    B_l: ClassVar[np.ndarray] = np.array([[0.0813], [0.2]])  # local state-space matrix B
-    A_c_l: ClassVar[np.ndarray] = np.array([[0, 0], [0, -0.1]])  # local coupling matrix A_c
+    A_l: ClassVar[np.ndarray] = np.array(
+        [[0.9, 0.35], [0, 1.1]]
+    )  # local state-space matrix A
+    B_l: ClassVar[np.ndarray] = np.array(
+        [[0.0813], [0.2]]
+    )  # local state-space matrix B
+    A_c_l: ClassVar[np.ndarray] = np.array(
+        [[0, 0], [0, -0.1]]
+    )  # local coupling matrix A_c
 
     A_l_innacurate: ClassVar[np.ndarray] = np.asarray(
         [[1, 0.25], [0, 1]]
@@ -39,13 +44,10 @@ class Model:
 
     def __init__(self):
         """Initializes the model."""
-        self._A, self._B = self.centralized_dynamics_from_local(
+        self.A, self.B = self.centralized_dynamics_from_local(
             [self.A_l] * self.n,
             [self.B_l] * self.n,
-            [
-                [self.A_c_l for _ in range(np.sum(self.adj[i]))]
-                for i in range(self.n)
-            ],
+            [[self.A_c_l for _ in range(np.sum(self.adj[i]))] for i in range(self.n)],
         )
 
     def centralized_dynamics_from_local(
@@ -71,7 +73,11 @@ class Model:
         tuple[np.ndarray | cs.SX, np.ndarray | cs.SX]
             Global state-space matrices A and B.
         """
-        # TODO add assert check on dimensions of lists for A_c
+        if any(len(A_c_list[i]) != np.sum(self.adj[i]) for i in range(self.n)):
+            raise ValueError(
+                "A_c_list must have the same length as the number of neighbors."
+            )
+
         if isinstance(A_list[0], np.ndarray):
             row_func = lambda x: np.hstack(x)
             col_func = lambda x: np.vstack(x)
@@ -114,40 +120,3 @@ class Model:
 
 
 m = Model()
-# def get_centralized_dynamics(
-#     A_l: np.ndarray,
-#     B_l: np.ndarray,
-#     A_c: np.ndarray,
-# ):
-#     """Returns a centralized representation of the dynamics from the local dynamics."""
-#     A = np.zeros((n * nx_l, n * nx_l))  # global state-space matrix A
-#     for i in range(n):
-#         for j in range(i, n):
-#             if i == j:
-#                 A[nx_l * i : nx_l * (i + 1), nx_l * i : nx_l * (i + 1)] = A_l
-#             elif Adj[i, j] == 1:
-#                 A[nx_l * i : nx_l * (i + 1), nx_l * j : nx_l * (j + 1)] = A_c
-#                 A[nx_l * j : nx_l * (j + 1), nx_l * i : nx_l * (i + 1)] = A_c
-#     B = block_diag(*[B_l] * n)  # global state-space matix B
-#     return A, B
-
-
-# def get_learnable_centralized_dynamics(
-#     A_list: list[cs.SX],
-#     B_list: list[cs.SX],
-#     A_c_list: list[list[cs.SX]],
-# ):
-#     """Returns a centralized representation of dynamics from symbolic local dynamics matrices."""
-#     A = cs.SX.zeros(n * nx_l, n * nx_l)  # global state-space matrix A
-#     B = cs.SX.zeros(n * nx_l, n * nu_l)  # global state-space matix B
-#     for i in range(n):
-#         for j in range(n):
-#             if i == j:
-#                 A[nx_l * i : nx_l * (i + 1), nx_l * i : nx_l * (i + 1)] = A_list[i]
-#                 B[nx_l * i : nx_l * (i + 1), nu_l * i : nu_l * (i + 1)] = B_list[i]
-#             else:
-#                 if Adj[i, j] == 1:
-#                     A[nx_l * i : nx_l * (i + 1), nx_l * j : nx_l * (j + 1)] = A_c_list[
-#                         i
-#                     ][j]
-#     return A, B
