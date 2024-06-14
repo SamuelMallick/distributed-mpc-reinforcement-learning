@@ -1,3 +1,6 @@
+import queue
+import threading
+from collections.abc import Callable
 from typing import Any
 
 import casadi as cs
@@ -45,6 +48,7 @@ class AdmmCoordinator:
         nu_l: int,
         rho: float,
         iters: int = 50,
+        threading: bool = True,
     ) -> None:
         """Initialise the ADMM coordinator.
 
@@ -63,7 +67,10 @@ class AdmmCoordinator:
         rho: float
             Constant penalty term for augmented lagrangian.
         iters: int = 50
-            Fixed number of ADMM iterations."""
+            Fixed number of ADMM iterations.
+        threading: bool = True
+            If `True`, the local optimization problems are parallelized using threading.
+        """
         if not all(isinstance(agent.V, MpcAdmm) for agent in agents):
             raise ValueError(
                 f"All agents must have ADMM-based MPCs. Received: {[type(agent.V) for agent in agents]}"
@@ -76,6 +83,7 @@ class AdmmCoordinator:
         self.nu_l = nu_l
         self.rho = rho
         self.N = N
+        self.threading = threading
 
         # create auxillary vars for ADMM procedure
         self.y = [
@@ -85,6 +93,14 @@ class AdmmCoordinator:
             np.zeros((nx_l * len(self.G[i]), N + 1)) for i in range(self.n)
         ]  # augmented states
         self.z = np.zeros((self.n, nx_l, N + 1))  # global copies of local states
+
+        self.output_queue: queue.Queue = (
+            queue.Queue()
+        )  # queue for storing thread outputs
+
+    def thread_worker(self, func: Callable, args, output_queue: queue.Queue) -> None:
+        """Worker function for threading. Evaluates the function and puts the result in the output queue."""
+        output_queue.put(func(*args))
 
     def solve_admm(
         self,
@@ -133,21 +149,57 @@ class AdmmCoordinator:
                 self.agents[i].fixed_parameters["z"] = self.z[self.G[i], :].reshape(
                     -1, self.N + 1
                 )
+            if not self.threading:
+                for i in range(len(self.agents)):
+                    if action is None:
+                        loc_actions[i], local_sols[i] = self.agents[i].state_value(
+                            x_l[i],
+                            deterministic=deterministic,
+                            action_space=action_space,
+                        )
+                    else:
+                        local_sols[i] = self.agents[i].action_value(x_l[i], u_l[i])
+            else:
+                threads = [
+                    threading.Thread(
+                        target=self.thread_worker,
+                        args=(
+                            (
+                                self.agents[i].state_value
+                                if action is None
+                                else self.agents[i].action_value
+                            ),
+                            (
+                                (x_l[i], deterministic)
+                                if action is None
+                                else (x_l[i], u_l[i])
+                            ),  # TODO add back in action space
+                            self.output_queue,
+                        ),
+                    )
+                    for i in range(self.n)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+                for i in range(self.n):
+                    if action is None:
+                        loc_actions[i], local_sols[i] = self.output_queue.get()
+                    else:
+                        local_sols[i] = self.output_queue.get()
 
-                if action is None:
-                    loc_actions[i], local_sols[i] = self.agents[i].state_value(
-                        x_l[i], deterministic=deterministic, action_space=action_space
-                    )
-                else:
-                    local_sols[i] = self.agents[i].action_value(x_l[i], u_l[i])
-                if not local_sols[i].success:
-                    # not raising an error on MPC failures
-                    u_iters[iter, i] = np.nan
-                    self.agents[i].on_mpc_failure(
-                        episode=0, status=local_sols[i].status, raises=False
-                    )
-                else:
-                    u_iters[iter, i] = local_sols[i].vals["u"]
+            if not local_sols[i].success:
+                # not raising an error on MPC failures
+                u_iters[iter, i] = np.nan
+                self.agents[i].on_mpc_failure(
+                    episode=0,
+                    status=local_sols[i].status,
+                    raises=False,
+                    timestep=0,  # here we don't pass timestep or ep number
+                )
+            else:
+                u_iters[iter, i] = local_sols[i].vals["u"]
 
                 # construct solution to augmented state from local state and coupled states
                 self.augmented_x[i] = cs.vertcat(
