@@ -1,4 +1,3 @@
-from typing import Literal
 import casadi as cs
 
 # import networkx as netx
@@ -8,6 +7,8 @@ from csnlp.wrappers import Mpc
 from model import Model
 
 from dmpcrl.mpc.mpc_admm import MpcAdmm
+from dmpcrl.utils.solver_options import SolverOptions
+
 
 class LearnableMpc(Mpc[cs.SX]):
     """Abstract class for learnable MPC controllers. Implemented by centralized and distributed child classes"""
@@ -16,7 +17,7 @@ class LearnableMpc(Mpc[cs.SX]):
 
     def __init__(self, model: Model) -> None:
         """Initializes the learnable MPC controller.
-        
+
         Parameters
         ----------
         model : Model
@@ -25,13 +26,15 @@ class LearnableMpc(Mpc[cs.SX]):
             The prediction horizon."""
         self.n = model.n
         self.nx_l, self.nu_l = model.nx_l, model.nu_l
-        self.nx, self.nu = model.n*model.nx_l, model.n*model.nu_l
+        self.nx, self.nu = model.n * model.nx_l, model.n * model.nu_l
         self.x_bnd_l, self.u_bnd_l = model.x_bnd_l, model.u_bnd_l
-        self.x_bnd, self.u_bnd = np.tile(model.x_bnd_l, model.n), np.tile(model.u_bnd_l, model.n)
-        self.w_l = np.array([[1.2e2, 1.2e2]])  # penalty weight for constraint violations in cost
-        self.w = np.tile(
-            self.w_l, (1, self.n)
+        self.x_bnd, self.u_bnd = np.tile(model.x_bnd_l, model.n), np.tile(
+            model.u_bnd_l, model.n
         )
+        self.w_l = np.array(
+            [[1.2e2, 1.2e2]]
+        )  # penalty weight for constraint violations in cost
+        self.w = np.tile(self.w_l, (1, self.n))
         self.adj = model.adj
 
         # standard learnable parameters dictionary for local agent
@@ -42,13 +45,14 @@ class LearnableMpc(Mpc[cs.SX]):
             "b": np.zeros(self.nx_l),
             "f": np.zeros(self.nx_l + self.nu_l),
         }
-                    
+
+
 class CentralizedMpc(LearnableMpc):
     """A centralised learnable MPC controller."""
-    
+
     def __init__(self, model: Model, prediction_horizon: int) -> None:
         """Initializes the centralized learnable MPC controller.
-        
+
         Parameters
         ----------
         model : Model
@@ -65,26 +69,54 @@ class CentralizedMpc(LearnableMpc):
 
         # create MPC parameters
         # dynamics paratmeters
-        A_list = [self.parameter(f"A_{i}", (self.nx_l, self.nx_l)) for i in range(self.n)]
-        B_list = [self.parameter(f"B_{i}", (self.nx_l, self.nu_l)) for i in range(self.n)]
+        A_list = [
+            self.parameter(f"A_{i}", (self.nx_l, self.nx_l)) for i in range(self.n)
+        ]
+        B_list = [
+            self.parameter(f"B_{i}", (self.nx_l, self.nu_l)) for i in range(self.n)
+        ]
         # if no coupling between i and j, A_c_list[i, j] = None, otherwise we add a parameterized matrix
-        A_c_list = [[self.parameter(f"A_c_{i}_{j}",(self.nx_l, self.nx_l)) for j in range(self.n) if self.adj[i, j]] for i in range(self.n)]
+        A_c_list = [
+            [
+                self.parameter(f"A_c_{i}_{j}", (self.nx_l, self.nx_l))
+                for j in range(self.n)
+                if self.adj[i, j]
+            ]
+            for i in range(self.n)
+        ]
         b_list = [self.parameter(f"b_{i}", (self.nx_l, 1)) for i in range(self.n)]
         # cost parameters
         V0_list = [self.parameter(f"V0_{i}", (1,)) for i in range(self.n)]
-        f_list = [self.parameter(f"f_{i}", (self.nx_l + self.nu_l, 1)) for i in range(self.n)]
+        f_list = [
+            self.parameter(f"f_{i}", (self.nx_l + self.nu_l, 1)) for i in range(self.n)
+        ]
         # constraints parameters
         x_lb_list = [self.parameter(f"x_lb_{i}", (self.nx_l,)) for i in range(self.n)]
         x_ub_list = [self.parameter(f"x_ub_{i}", (self.nx_l,)) for i in range(self.n)]
 
         # initial values for learnable parameters
-        A_l_inac, B_l_inac, A_c_l_inac = model.A_l_innacurate, model.B_l_innacurate, model.A_c_l_innacurate
+        A_l_inac, B_l_inac, A_c_l_inac = (
+            model.A_l_innacurate,
+            model.B_l_innacurate,
+            model.A_c_l_innacurate,
+        )
 
-        self.learnable_pars_init = {f"{name}_{i}": val for name, val in self.learnable_pars_init_local.items() for i in range(self.n)}
+        self.learnable_pars_init = {
+            f"{name}_{i}": val
+            for name, val in self.learnable_pars_init_local.items()
+            for i in range(self.n)
+        }
         self.learnable_pars_init.update({f"A_{i}": A_l_inac for i in range(self.n)})
         self.learnable_pars_init.update({f"B_{i}": B_l_inac for i in range(self.n)})
-        self.learnable_pars_init.update({f"A_c_{i}_{j}": A_c_l_inac for i in range(self.n) for j in range(self.n) if self.adj[i, j]})
-        
+        self.learnable_pars_init.update(
+            {
+                f"A_c_{i}_{j}": A_c_l_inac
+                for i in range(self.n)
+                for j in range(self.n)
+                if self.adj[i, j]
+            }
+        )
+
         # concat some params for use in cost and constraint expressions
         V0 = cs.vcat(V0_list)
         x_lb = cs.vcat(x_lb_list)
@@ -98,7 +130,10 @@ class CentralizedMpc(LearnableMpc):
         # variables (state, action, slack)
         x, _ = self.state("x", self.nx)
         u, _ = self.action(
-            "u", self.nu, lb=self.u_bnd[0].reshape(-1, 1), ub=self.u_bnd[1].reshape(-1, 1)
+            "u",
+            self.nu,
+            lb=self.u_bnd[0].reshape(-1, 1),
+            ub=self.u_bnd[1].reshape(-1, 1),
         )
         s, _, _ = self.variable("s", (self.nx, N), lb=0)
 
@@ -116,32 +151,30 @@ class CentralizedMpc(LearnableMpc):
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
             * cs.sum2(
-                gammapowers * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + self.w @ s)
+                gammapowers
+                * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + self.w @ s)
             )
         )
 
         # solver
-        opts = {    # TODO change options for speed up
-            "expand": True,
-            "print_time": False,
-            "bound_consistency": True,
-            "calc_lam_x": True,
-            "calc_lam_p": False,
-            "ipopt": {
-                "max_iter": 500,
-                "sb": "yes",
-                "print_level": 0,
-            },
-        }
-        self.init_solver(opts, solver="ipopt")
+        solver = "qpoases"
+        opts = SolverOptions.get_solver_options(solver)
+        self.init_solver(opts, solver=solver)
 
 
 class LocalMpc(MpcAdmm, LearnableMpc):
     """Local learnable MPC."""
 
-    def __init__(self, model: Model, prediction_horizon: int, num_neighbours: int, my_index: int, rho: float = 0.5) -> None:
+    def __init__(
+        self,
+        model: Model,
+        prediction_horizon: int,
+        num_neighbours: int,
+        my_index: int,
+        rho: float = 0.5,
+    ) -> None:
         """Initializes the local learnable MPC controller.
-        
+
         Parameters
         ----------
         model : Model
@@ -171,13 +204,18 @@ class LocalMpc(MpcAdmm, LearnableMpc):
         f = self.parameter("f", (self.nx_l + self.nu_l, 1))
         A = self.parameter("A", (self.nx_l, self.nx_l))
         B = self.parameter("B", (self.nx_l, self.nu_l))
-        A_c_list = [self.parameter(f"A_c_{i}", (self.nx_l, self.nx_l)) for i in range(num_neighbours)]
+        A_c_list = [
+            self.parameter(f"A_c_{i}", (self.nx_l, self.nx_l))
+            for i in range(num_neighbours)
+        ]
 
         # dictionary containing initial values for local learnable parameters
         self.learnable_pars_init = self.learnable_pars_init_local.copy()
         self.learnable_pars_init["A"] = model.A_l_innacurate
         self.learnable_pars_init["B"] = model.B_l_innacurate
-        self.learnable_pars_init.update({f"A_c_{i}": model.A_c_l_innacurate for i in range(num_neighbours)})
+        self.learnable_pars_init.update(
+            {f"A_c_{i}": model.A_c_l_innacurate for i in range(num_neighbours)}
+        )
 
         # variables (state+coupling, action, slack)
         x, x_c = self.augmented_state(num_neighbours, my_index, self.nx_l)
@@ -189,7 +227,9 @@ class LocalMpc(MpcAdmm, LearnableMpc):
         )
         s, _, _ = self.variable("s", (self.nx_l, N), lb=0)
 
-        x_c_list = cs.vertsplit(x_c, np.arange(0, self.nx_l*num_neighbours+1, self.nx_l))   # store the bits of x that are couplings in a list for ease of access
+        x_c_list = cs.vertsplit(
+            x_c, np.arange(0, self.nx_l * num_neighbours + 1, self.nx_l)
+        )  # store the bits of x that are couplings in a list for ease of access
 
         # dynamics - added manually due to coupling
         for k in range(N):
@@ -214,21 +254,12 @@ class LocalMpc(MpcAdmm, LearnableMpc):
             + cs.sum2(f.T @ cs.vertcat(x[:, :-1], u))
             + 0.5
             * cs.sum2(
-                gammapowers * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + self.w_l @ s)
+                gammapowers
+                * (cs.sum1(x[:, :-1] ** 2) + 0.5 * cs.sum1(u**2) + self.w_l @ s)
             )
         )
 
         # solver
-        opts = {    # TODO change options for speed up
-            "expand": True,
-            "print_time": False,
-            "bound_consistency": True,
-            "calc_lam_x": True,
-            "calc_lam_p": False,
-            "ipopt": {
-                "max_iter": 2000,
-                "sb": "yes",
-                "print_level": 0,
-            },
-        }
-        self.init_solver(opts, solver="ipopt")
+        solver = "qrqp"
+        opts = SolverOptions.get_solver_options(solver)
+        self.init_solver(opts, solver=solver)
