@@ -260,6 +260,6 @@ class LocalMpc(MpcAdmm, LearnableMpc):
         )
 
         # solver
-        solver = "qrqp"
+        solver = "ipopt"
         opts = SolverOptions.get_solver_options(solver)
         self.init_solver(opts, solver=solver)

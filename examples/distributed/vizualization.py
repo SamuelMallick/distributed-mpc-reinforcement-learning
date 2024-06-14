@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from model import Model
 
-file_name = "C_true.pkl"
+# file_name = "examples/distributed/centralized_data.pkl"
+file_name = "C_false.pkl"
 with open(
     file_name,
     "rb",

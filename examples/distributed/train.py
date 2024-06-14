@@ -19,7 +19,7 @@ from dmpcrl.core.admm import AdmmCoordinator
 
 save_data = True
 
-centralized_flag = True
+centralized_flag = False
 prediction_horizon = 10
 rho = 0.5
 model = Model()
@@ -59,7 +59,7 @@ distributed_fixed_parameters: list = [
     distributed_mpcs[i].fixed_pars_init for i in range(Model.n)
 ]
 
-env = MonitorEpisodes(TimeLimit(LtiSystem(model=model), max_episode_steps=int(5e3)))
+env = MonitorEpisodes(TimeLimit(LtiSystem(model=model), max_episode_steps=int(2e3)))
 agent = Log(  # type: ignore[var-annotated]
     RecordUpdates(
         LstdQLearningAgentCoordinator(
@@ -71,7 +71,7 @@ agent = Log(  # type: ignore[var-annotated]
             ),
             distributed_learnable_parameters=distributed_learnable_parameters,
             N=prediction_horizon,
-            nx=2,  # remove hard coding
+            nx=2,
             nu=1,
             adj=model.adj,
             rho=rho,
@@ -96,7 +96,7 @@ agent = Log(  # type: ignore[var-annotated]
         )
     ),
     level=logging.DEBUG,
-    log_frequencies={"on_timestep_end": 100},
+    log_frequencies={"on_timestep_end": 1},
 )
 
 agent.train(env=env, episodes=1, seed=1, raises=False)

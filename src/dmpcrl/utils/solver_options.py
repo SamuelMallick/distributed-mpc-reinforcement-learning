@@ -36,7 +36,7 @@ class SolverOptions:
     solver_options["qpoases"] = {
         "print_time": False,
         "record_time": True,
-        "error_on_fail": True,
+        "error_on_fail": False,
         "printLevel": "none",
     }
 
