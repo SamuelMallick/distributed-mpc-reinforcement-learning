@@ -408,7 +408,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             solQ_list = self.distributed_action_value(state, joint_action)
             if self.centralized_debug:
                 solQ = self.action_value(state, action)
-                self.validate_dual_variables(solQ, solQ_list)
+                self.validate_distributed_solution(solQ, solQ_list)
 
             # step the system with action computed at the previous iteration
             new_state, cost, truncated, terminated, info_dict = env.step(joint_action)
@@ -478,13 +478,13 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
                 agent.on_timestep_end(env, episode, timestep)
         return rewards
 
-    def validate_dual_variables(
+    def validate_distributed_solution(
         self,
         centralized_sol: Solution,
         distributed_sols: list[Solution],
         constraint_type: Literal["dynamics"] = "dynamics",
     ) -> None:
-        """Compares the dual variables of centralised and distributed solutions.
+        """Compares the centralized and distributed solutions.
 
         Parameters
         ----------
@@ -497,6 +497,16 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             'dynamics'.
 
         """
+        # validate the primal variables
+        dx = centralized_sol.vals["x"] - np.vstack([s.vals['x'] for s in distributed_sols])
+        du = centralized_sol.vals["u"] - np.vstack([s.vals['u'] for s in distributed_sols])
+        if cs.mmax(cs.fabs(dx)) > 1e-04 or cs.mmax(cs.fabs(du)) > 1e-04:
+            warn(
+                f"Max difference in primal variables: dx={cs.mmax(cs.fabs(dx))}, du={cs.mmax(cs.fabs(du))}."
+            )
+        df = centralized_sol.f - sum([s.f for s in distributed_sols])
+        if cs.fabs(df) > 1e-04:
+            warn(f"Total error of {cs.fabs(df)} in distributed objective function values.")
         if constraint_type == "dynamics":
             cent_duals = centralized_sol.dual_vals["lam_g_dyn"]
             # reshape to match centralised duals
