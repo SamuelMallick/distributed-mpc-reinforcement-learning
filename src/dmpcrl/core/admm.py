@@ -118,6 +118,17 @@ class AdmmCoordinator:
         u_iters = np.empty(
             (self.iters, self.n, self.nu_l, self.N)
         )  # store actions over iterations
+        y_iters = [
+            np.empty((self.iters, self.nx_l * len(self.G[i]), self.N + 1))
+            for i in range(self.n)
+        ]  # store y over iterations
+        z_iters = np.empty(
+            (self.iters, self.n, self.nx_l, self.N + 1)
+        )  # store z over iterations
+        augmented_x_iters = [
+            np.empty((self.iters, self.nx_l * len(self.G[i]), self.N + 1))
+            for i in range(self.n)
+        ]  # augmented states over iterations
 
         loc_actions = np.empty((self.n, self.nu_l))
         local_sols: list[Solution] = [None] * len(self.agents)
@@ -155,6 +166,7 @@ class AdmmCoordinator:
                     local_sols[i].vals["x"],
                     local_sols[i].vals["x_c"][self.nx_l * self.G[i].index(i) :, :],
                 )
+                augmented_x_iters[i][iter] = self.augmented_x[i]
 
             # z update: an averaging of all agents' optinions on each z
             for i in range(self.n):
@@ -172,15 +184,22 @@ class AdmmCoordinator:
                     ),
                     axis=0,
                 )
+                z_iters[iter, i] = self.z[i]
 
             # y update: increment by the residual
             for i in range(self.n):
                 self.y[i] = self.y[i] + self.rho * (
                     self.augmented_x[i] - self.z[self.G[i], :].reshape(-1, self.N + 1)
                 )
+                y_iters[i][iter] = self.y[i]
 
         return (
             loc_actions,
             local_sols,
-            {"u_iters": u_iters},
-        )  # return actions and solutions from last ADMM iter
+            {
+                "u_iters": u_iters,
+                "y_iters": y_iters,
+                "z_iters": z_iters,
+                "augmented_x_iters": augmented_x_iters,
+            },
+        )  # return actions and solutions from last ADMM iter and an info dict
