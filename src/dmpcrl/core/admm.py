@@ -129,6 +129,7 @@ class AdmmCoordinator:
             np.empty((self.iters, self.nx_l * len(self.G[i]), self.N + 1))
             for i in range(self.n)
         ]  # augmented states over iterations
+        f_iters = np.empty((self.iters, self.n))  # store local costs over iterations
 
         loc_actions = np.empty((self.n, self.nu_l))
         local_sols: list[Solution] = [None] * len(self.agents)
@@ -157,8 +158,10 @@ class AdmmCoordinator:
                     self.agents[i].on_mpc_failure(
                         episode=0, status=local_sols[i].status, raises=False, timestep=0
                     )
+                    f_iters[iter, i] = np.inf
                 else:
                     u_iters[iter, i] = local_sols[i].vals["u"]
+                    f_iters[iter, i] = local_sols[i].f
 
                 # construct solution to augmented state from local state and coupled states
                 self.augmented_x[i] = cs.vertcat(
@@ -201,5 +204,6 @@ class AdmmCoordinator:
                 "y_iters": y_iters,
                 "z_iters": z_iters,
                 "augmented_x_iters": augmented_x_iters,
+                "f_iters": f_iters,
             },
         )  # return actions and solutions from last ADMM iter and an info dict
