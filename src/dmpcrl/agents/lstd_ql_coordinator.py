@@ -325,7 +325,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self.reset(rng)
         for agent in self.agents:
             agent.reset(rng)
+            agent.unwrapped._updates_enabled = False
         returns = np.zeros(episodes)
+        self._updates_enabled = False
 
         self.on_validation_start(env)
         for agent in self.agents:
