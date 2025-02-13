@@ -64,7 +64,10 @@ class AdmmCoordinator:
             Constant penalty term for augmented lagrangian.
         iters: int = 50
             Fixed number of ADMM iterations."""
-        if not all(isinstance(agent.V, MpcAdmm) for agent in agents):
+        if not all(
+            isinstance(agent.V, MpcAdmm) or agent.V.is_wrapped(MpcAdmm)
+            for agent in agents
+        ):
             raise ValueError(
                 f"All agents must have ADMM-based MPCs. Received: {[type(agent.V) for agent in agents]}"
             )
