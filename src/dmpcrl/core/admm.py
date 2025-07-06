@@ -133,6 +133,7 @@ class AdmmCoordinator:
             for i in range(self.n)
         ]  # augmented states over iterations
         f_iters = np.empty((self.iters, self.n))  # store local costs over iterations
+        residual_iters = np.zeros((self.iters, 1))  # store residuals over iterations
 
         loc_actions = np.empty((self.n, self.nu_l))
         local_sols: list[Solution] = [None] * len(self.agents)
@@ -198,6 +199,10 @@ class AdmmCoordinator:
                     self.augmented_x[i] - self.z[self.G[i], :].reshape(-1, self.N + 1)
                 )
                 y_iters[i][iter] = self.y[i]
+                residual_iters[iter] += np.linalg.norm(
+                    self.augmented_x[i] - self.z[self.G[i], :].reshape(-1, self.N + 1),
+                    ord=2,
+                )
 
         return (
             loc_actions,
@@ -208,5 +213,6 @@ class AdmmCoordinator:
                 "z_iters": z_iters,
                 "augmented_x_iters": augmented_x_iters,
                 "f_iters": f_iters,
+                "residual_iters": residual_iters,
             },
         )  # return actions and solutions from last ADMM iter and an info dict
