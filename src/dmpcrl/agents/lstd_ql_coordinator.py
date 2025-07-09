@@ -10,7 +10,11 @@ from gymnasium import Env
 from gymnasium.spaces import Box
 from mpcrl import LstdQLearningAgent
 from mpcrl.core.experience import ExperienceReplay
-from mpcrl.core.exploration import ExplorationStrategy, StepWiseExploration
+from mpcrl.core.exploration import (
+    ExplorationStrategy,
+    StepWiseExploration,
+    NoExploration,
+)
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.core.warmstart import WarmStartStrategy
@@ -163,7 +167,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         flag = centralized_flag or centralized_debug
 
         if not all(
-            isinstance(agent.exploration, StepWiseExploration) for agent in agents
+            isinstance(agent.exploration, StepWiseExploration)
+            or isinstance(agent.exploration, NoExploration)
+            for agent in agents
         ):
             raise ValueError(
                 "All agents must have a StepWiseExploration object for distributed learning."
