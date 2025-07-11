@@ -18,7 +18,7 @@ from mpcrl.core.exploration import (
 from mpcrl.core.parameters import LearnableParametersDict
 from mpcrl.core.update import UpdateStrategy
 from mpcrl.core.warmstart import WarmStartStrategy
-from mpcrl.optim import GradientDescent
+from mpcrl.optim import GradientDescent, NewtonMethod
 from mpcrl.optim.gradient_based_optimizer import GradientBasedOptimizer
 from mpcrl.util.seeding import RngType, mk_seed
 
@@ -155,16 +155,17 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         centralized_debug : bool, optional
             If true the centralized MPC will be used to check the distributed MPCs at each timestep.
         """
-        if hessian_type != "none" and not centralized_flag:
-            raise ValueError(
-                "Distributed learning does not support second order information."
-            )
+        # if hessian_type != "none" and not centralized_flag:
+        #     raise ValueError(
+        #         "Distributed learning does not support second order information."
+        #     )
         self.n = len(agents)
         self.agents = agents
         self.N = N
         self.centralized_flag = centralized_flag
         self.centralized_debug = centralized_debug
         flag = centralized_flag or centralized_debug
+        self._is_training = False
 
         if not all(
             isinstance(agent.exploration, StepWiseExploration)
@@ -180,7 +181,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             centralized_mpc,
             centralized_update_strategy if flag else 1,
             centralized_discount_factor if flag else 1.0,
-            centralized_optimizer if flag else GradientDescent(1),  # dummy optimizer
+            centralized_optimizer if flag else NewtonMethod(1),  # dummy optimizer
             centralized_learnable_parameters if flag else LearnableParametersDict(),
             centralized_fixed_parameters if flag else None,
             centralized_exploration if flag else None,
@@ -250,9 +251,9 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         if not self.centralized_flag:
             for agent in self.agents:
                 agent.reset(rng)
-            self._updates_enabled = False
+                agent.unwrapped._is_training = True
         else:
-            self._updates_enabled = True
+            self._is_training = True
         self.reset(rng)
 
         self._raises = raises
@@ -322,6 +323,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         ------
             Raises if the MPC optimization solver fails and `warns_on_exception=False`.
         """
+        self._is_training = False
         if self.centralized_flag:
             return super().evaluate(
                 env, episodes, deterministic, seed, raises, env_reset_options
@@ -331,9 +333,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
         self.reset(rng)
         for agent in self.agents:
             agent.reset(rng)
-            agent.unwrapped._updates_enabled = False
+            agent.unwrapped._is_training = False
         returns = np.zeros(episodes)
-        self._updates_enabled = False
 
         self.on_validation_start(env)
         for agent in self.agents:
