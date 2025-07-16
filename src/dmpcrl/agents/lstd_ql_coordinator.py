@@ -447,8 +447,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             # consensus on distributed values
             V_f_vec = np.asarray([sol.f for sol in solV_list])
             Q_f_vec = np.asarray([sol.f for sol in solQ_list])
-            V_f_con = self.consensus_coordinator.average_consensus(V_f_vec)
-            Q_f_con = self.consensus_coordinator.average_consensus(Q_f_vec)
+            V_f_con = self.consensus_coordinator.average_consensus(self.n * V_f_vec)
+            Q_f_con = self.consensus_coordinator.average_consensus(self.n * Q_f_vec)
             if not np.allclose(V_f_con, V_f_con[0], atol=1e-04) or not np.allclose(
                 Q_f_con, Q_f_con[0], atol=1e-04
             ):
@@ -459,8 +459,8 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             if dist_costs is None:  # agents get direct access to centralized cost
                 cost_con = np.full((self.n,), cost)
             else:  # agents use consensus to get the centralized cost from local costs
-                cost_con = self.n * self.consensus_coordinator.average_consensus(
-                    np.asarray(dist_costs)
+                cost_con = self.consensus_coordinator.average_consensus(
+                    self.n * np.asarray(dist_costs)
                 )
                 if not np.allclose(cost_con, cost_con[0], atol=1e-04):
                     warn(
@@ -532,7 +532,7 @@ class LstdQLearningAgentCoordinator(LstdQLearningAgent):
             dist_duals = np.asarray(
                 [
                     [
-                        distributed_sols[i].dual_vals[f"lam_g_dynam_{k}"]
+                        distributed_sols[i].dual_vals[f"lam_g_dyn_{k}"]
                         for k in range(self.N)
                     ]
                     for i in range(self.n)
